@@ -1,7 +1,23 @@
-# LFM3Local — Android Harness MVP 0.6.1
+# LFM3Local — Android Harness MVP 0.7.0
 
 Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com chat estilo mensageiro, histórico local e **harness inicial de ferramentas** via `llama.cpp`.
 
+
+## v0.7.0 — restauração rápida de contexto (otimização prática)
+
+**Problema anterior:** o aplicativo reconstruía o cache KV ao alternar conversas, reprocessando centenas ou milhares de tokens pelo modelo mesmo que aquele chat já estivesse em memória.
+
+**Correções e indicadores testáveis:**
+- Cache RAM de estados por conversa via `llama_state_seq_get_size/get_data/set_data` da versão fixada de `llama.cpp`. Mantém até **2 snapshots**, com orçamento máximo total **160 MiB** e máximo **120 MiB por snapshot**; se o estado não couber, usa a restauração tradicional em vez de assumir sucesso.
+- Cada snapshot depende da identidade do chat, hash do conteúdo de suas mensagens e hash da configuração do sistema e das skills. Desabilitar/alterar ferramentas ou editar histórico invalida o reuso.
+- Ao criar a primeira conversa após carregar o GGUF, reutiliza o prompt de sistema já processado em vez de executá-lo duas vezes.
+- **Fallback frio mais curto:** preserva aproximadamente os últimos **1.792 tokens** no contexto ativo, incluindo prompt de sistema; antes aceitava até **2.560 tokens**. Conversas completas continuam salvas no SQLite, mas as mensagens antigas podem não estar no contexto de inferência.
+- Exibe em cada chat a origem do contexto (`sistema reutilizado`, `cache KV (RAM)` ou `histórico SQLite`) e o tempo total da restauração em milissegundos.
+- Regressão JUnit: valida hashes de mensagens, alterações de conteúdo/ordem e limites de identidade de cache.
+
+**Testar no celular:** faça uma conversa com 5–10 mensagens, entre em outra conversa e volte. Quando o snapshot couber no limite de RAM, a segunda abertura deve exibir `cache KV (RAM)` e um tempo inferior ao de `histórico SQLite`. Repita com vários chats e após fechar totalmente o app para verificar fallback. O cache é **volátil** e não sobrevive à finalização do processo.
+
+**Limites:** não há benchmark real com GGUF nesta infraestrutura. O custo e o tamanho efetivo da serialização de KV variam conforme o modelo e o contexto; não é garantido um cache hit em todas as conversas. A versão permanece instalada sob `br.com.lfm3local.nativepreview` e usa o próprio armazenamento do Native Beta.
 
 ## Aviso de instalação da versão 0.6.1
 
@@ -84,7 +100,7 @@ experimentais do Preview. Não substitui uma assinatura de release segura e perm
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45215385181). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.1-nativepreview-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45215385181). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.7.0-fast-context-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 

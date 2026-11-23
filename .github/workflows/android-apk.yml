@@ -72,7 +72,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/debug/app-debug.apk | grep "package: name='br.com.lfm3local.nativepreview'"
       - uses: actions/upload-artifact@v4
         with:
-          name: LFM3Local-Harness-v0.6.1-nativepreview-APK
+          name: LFM3Local-Harness-v0.7.0-fast-context-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
