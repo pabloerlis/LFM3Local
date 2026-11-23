@@ -4,6 +4,8 @@
 #include <cmath>
 #include <string>
 #include <deque>
+#include <algorithm>
+#include <new>
 #include <cstdint>
 #include <limits>
 #include <chrono>
@@ -330,6 +332,8 @@ static void shift_context() {
 }
 
 
+
+static void reset_short_term_states();  // defined after message-finalization helpers
 
 // Create a verified, size-bounded state snapshot without replaying history.
 // Only invoked after a fully completed turn, never during sampling.
@@ -689,8 +693,10 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_restoreConversationNative(
                 }
             }
             tokens = common_tokenize(g_context, rendered, !g_native_tool_mode, true);
-            // Leave room for the next prompt and 512 generated tokens.
-            if (tokens.size() <= DEFAULT_CONTEXT_SIZE - 1536) break;
+            // Fast cold restore: cap prefill to ~1792 tokens while retaining
+            // original, complete messages in SQLite for later retrieval.
+            // This trades active model context for lower CPU prefill latency.
+            if (tokens.size() <= 1792) break;
             if (first >= saved.size()) return 5;
             ++first;
             // Drop the matching assistant as well when possible.
