@@ -90,4 +90,65 @@ class HarnessTurnCoordinatorTest {
         HarnessTurnCoordinator(backend, LocalToolRegistry(clock)).run("Que horas?", {}, {}, {})
         assertTrue(backend.lastResult.contains("2026-11-23T12:00:00Z"))
     }
+
+    @Test fun localNotesSkillExecutesThenLfm3Replies() = runBlocking {
+        val notes = object : NoteSource {
+            override fun allNotes() = listOf(
+                NoteRecord(7, "Anotação de laboratório",
+                    "O protótipo deve usar bateria LiFePO4.", 0)
+            )
+        }
+        val backend = Backend(
+            "<tool_call><function=search_local_notes><parameter=query>protótipo bateria</parameter></function></tool_call>",
+            "Na anotação, você indicou bateria LiFePO4 para o protótipo."
+        )
+        val events = mutableListOf<HarnessEvent>()
+        val skills = SkillCatalog(listOf(NotesSkill(notes)))
+        val output = HarnessTurnCoordinator(backend, skills = skills).run(
+            "O que escrevi sobre a bateria?", {}, {}, { events.add(it) }
+        )
+        assertEquals(1, output.toolCalls)
+        assertTrue(output.text.contains("LiFePO4"))
+        assertEquals("search_local_notes", backend.lastName)
+        assertTrue(backend.lastResult.contains("LiFePO4"))
+        assertTrue(events.single().success)
+    }
+
+    @Test fun disabledSkillCannotRetrieveNotes() = runBlocking {
+        var accessed = false
+        val notes = object : NoteSource {
+            override fun allNotes(): List<NoteRecord> {
+                accessed = true
+                error("Disabled skill must not read notes")
+            }
+        }
+        val backend = Backend(
+            "<tool_call><function=search_local_notes><parameter=query>minhas notas</parameter></function></tool_call>",
+            "A skill não está disponível."
+        )
+        val result = HarnessTurnCoordinator(backend, skills = SkillCatalog()).run(
+            "Consulte minhas notas", {}, {}, {}
+        )
+        assertFalse(accessed)
+        assertEquals(1, result.toolCalls)
+        assertTrue(backend.lastResult.contains("não autorizada"))
+        assertFalse(result.text.contains("nota secreta"))
+        // Verify enabling it changes the documented tool visibility as well.
+        val enabled = harnessSystemPrompt(SkillCatalog(listOf(NotesSkill(notes))))
+        val disabled = harnessSystemPrompt(SkillCatalog())
+        assertTrue(enabled.contains("search_local_notes"))
+        assertFalse(disabled.contains("search_local_notes"))
+    }
+
+    @Test fun notesAndCoreShareTheSameInvocationBudget() {
+        val notes = object : NoteSource {
+            override fun allNotes() = listOf(NoteRecord(1, "Teste", "teste de laboratório", 0))
+        }
+        val policy = ToolTurnPolicy(LocalToolRegistry(), 2, SkillCatalog(listOf(NotesSkill(notes))))
+        assertTrue(policy.checkAndRun(ToolInvocation("calculator", mapOf("expression" to "2+2"))).success)
+        assertTrue(policy.checkAndRun(ToolInvocation("search_local_notes", mapOf("query" to "laboratório"))).success)
+        assertFalse(policy.checkAndRun(ToolInvocation("get_current_datetime", emptyMap())).success)
+        assertEquals(2, policy.attempts())
+    }
+
 }
