@@ -206,7 +206,7 @@ internal class InferenceEngineImpl private constructor(
             check(_state.value is InferenceEngine.State.ModelReady) {
                 "Tool schemas may only be registered when the engine is ready"
             }
-            require(tools.size in 1..12) { "At least one and at most 12 tools are allowed" }
+            require(tools.size <= 12) { "At most 12 tools are allowed" }
             require(tools.map { it.name }.distinct().size == tools.size) { "Duplicate tool names" }
             require(tools.all {
                 it.name.matches(Regex("[a-z][a-z0-9_]{0,63}")) &&

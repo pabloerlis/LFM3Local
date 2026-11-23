@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private val lastTurnTelemetry = mutableStateOf("")
     private val runtimeStage = mutableStateOf("Iniciando")
     private val nativeToolMode = mutableStateOf(false)
+    private val nativeToolsPreferred = mutableStateOf(true)
     private val toolTemplateStatus = mutableStateOf("Aguardando modelo")
     private val modelReady = mutableStateOf(false)
     private val modelBusy = mutableStateOf(true)
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.rgb(234, 230, 222)
         store = ChatStore(applicationContext)
         notesEnabled.value = getPreferences(MODE_PRIVATE).getBoolean(PREF_NOTES, false)
+        nativeToolsPreferred.value = getPreferences(MODE_PRIVATE).getBoolean(PREF_NATIVE_TOOLS, true)
         setContent { App() }
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { store.recoverPendingMessages() }
@@ -174,6 +176,9 @@ class MainActivity : ComponentActivity() {
                 notes = notes,
                 enabled = notesEnabled.value,
                 canChange = !modelBusy.value && !responding.value && !contextBusy.value,
+                nativePreferred = nativeToolsPreferred.value,
+                nativeStatus = toolTemplateStatus.value,
+                onNativePreferredChange = ::setNativeToolsPreferred,
                 errorMessage = notesError.value,
                 onBack = { homeSection.intValue = 0 },
                 onEnabledChange = ::setNotesSkillEnabled,
@@ -598,13 +603,16 @@ class MainActivity : ComponentActivity() {
 
     /** Registers the exact allowlist of local tools into the model's Jinja template. */
     private suspend fun syncToolSchemas(): Boolean {
-        val definitions = LocalToolRegistry().definitions + activeSkills().definitions()
+        val definitions = if (nativeToolsPreferred.value)
+            LocalToolRegistry().definitions + activeSkills().definitions()
+        else emptyList()
         val registered = engine.configureToolSchemas(definitions.map {
             NativeToolSchema(it.name, it.description, it.schema)
         })
         nativeToolMode.value = registered
-        toolTemplateStatus.value = if (registered) "Template LFM3 nativo"
-            else "Compatibilidade (prompt)"
+        toolTemplateStatus.value = if (!nativeToolsPreferred.value) "Compatibilidade (manual)"
+            else if (registered) "Template LFM3 nativo"
+            else "Compatibilidade (GGUF sem suporte)"
         return registered
     }
 
@@ -618,6 +626,14 @@ class MainActivity : ComponentActivity() {
                 notesError.value = "Falha ao consultar notas: " + (e.message ?: "desconhecida")
             }
         }
+    }
+
+    private fun setNativeToolsPreferred(enabled: Boolean) {
+        if (responding.value || modelBusy.value || contextBusy.value) return
+        nativeToolsPreferred.value = enabled
+        getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_NATIVE_TOOLS, enabled).apply()
+        nativeChatId = null
+        toolTemplateStatus.value = "Reconfiguração pendente"
     }
 
     private fun setNotesSkillEnabled(checked: Boolean) {
@@ -1030,6 +1046,7 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "LFM3Local"
         private const val PREF_MODEL = "model_path"
         private const val PREF_NOTES = "skill.local.notes.enabled"
+        private const val PREF_NATIVE_TOOLS = "harness.native_tools.preferred"
     }
 }
 

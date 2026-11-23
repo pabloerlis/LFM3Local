@@ -24,6 +24,9 @@ fun LocalNotesScreen(
     notes: List<NoteRecord>,
     enabled: Boolean,
     canChange: Boolean,
+    nativePreferred: Boolean,
+    nativeStatus: String,
+    onNativePreferredChange: (Boolean) -> Unit,
     errorMessage: String,
     onBack: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
@@ -62,6 +65,18 @@ fun LocalNotesScreen(
             }
             Spacer(Modifier.width(8.dp))
             Switch(checked = enabled, onCheckedChange = onEnabledChange, enabled = canChange)
+        }
+        HorizontalDivider(color = Color(0xFFEAEDEF))
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Ferramentas nativas (experimental)",
+                    fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("Usa os schemas no template do LFM3. Desligue para testar o mecanismo " +
+                    "anterior se a conversa falhar.", color = secondaryText, fontSize = 12.sp)
+                Text("Estado: " + nativeStatus, color = headerGreen, fontSize = 12.sp)
+            }
+            Switch(checked = nativePreferred,
+                onCheckedChange = onNativePreferredChange, enabled = canChange)
         }
         HorizontalDivider(color = Color(0xFFEAEDEF))
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
