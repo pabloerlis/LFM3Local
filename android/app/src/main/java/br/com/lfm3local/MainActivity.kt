@@ -38,6 +38,10 @@ import br.com.lfm3local.harness.Lfm3Backend
 import br.com.lfm3local.harness.harnessSystemPrompt
 import br.com.lfm3local.harness.retryOnceWhenContextFull
 import br.com.lfm3local.harness.TurnProfiler
+import br.com.lfm3local.harness.NoteRecord
+import br.com.lfm3local.harness.NotesSkill
+import br.com.lfm3local.harness.SkillCatalog
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -68,6 +72,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var store: ChatStore
     private val conversations = mutableStateListOf<LocalConversation>()
     private val entries = mutableStateListOf<LocalMessage>()
+    private val notes = mutableStateListOf<NoteRecord>()
+    private val notesEnabled = mutableStateOf(false)
+    private val homeSection = mutableIntStateOf(0)
+    private val notesError = mutableStateOf("")
     private val selectedId = mutableStateOf<Long?>(null)
     private val selectedTitle = mutableStateOf("")
     private val searchText = mutableStateOf("")
@@ -92,10 +100,12 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(7, 94, 84)
         window.navigationBarColor = android.graphics.Color.rgb(234, 230, 222)
         store = ChatStore(applicationContext)
+        notesEnabled.value = getPreferences(MODE_PRIVATE).getBoolean(PREF_NOTES, false)
         setContent { App() }
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { store.recoverPendingMessages() }
             refreshConversations()
+            refreshNotes()
             try {
                 engine = withContext(Dispatchers.IO) {
                     AiChat.getInferenceEngine(applicationContext)
@@ -155,6 +165,19 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HomeScreen() {
+        if (homeSection.intValue == 1) {
+            LocalNotesScreen(
+                notes = notes,
+                enabled = notesEnabled.value,
+                canChange = !modelBusy.value && !responding.value && !contextBusy.value,
+                errorMessage = notesError.value,
+                onBack = { homeSection.intValue = 0 },
+                onEnabledChange = ::setNotesSkillEnabled,
+                onSave = ::saveLocalNote,
+                onDelete = ::deleteLocalNote
+            )
+            return
+        }
         var deleting by remember { mutableStateOf<LocalConversation?>(null) }
         val filtered = conversations.filter {
             it.title.contains(searchText.value, ignoreCase = true) ||
@@ -175,8 +198,16 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxWidth().background(deepGreen).padding(
                     start = 20.dp, end = 20.dp, top = 18.dp, bottom = 14.dp
                 )) {
-                    Text("LFM3Local", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text("Conversas locais", color = Color(0xFFD4E9E5), fontSize = 13.sp)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("LFM3Local", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text("Conversas locais", color = Color(0xFFD4E9E5), fontSize = 13.sp)
+                        }
+                        TextButton(onClick = {
+                            homeSection.intValue = 1
+                            refreshNotes()
+                        }) { Text("Skills", color = Color.White) }
+                    }
                 }
                 OutlinedTextField(
                     value = searchText.value, onValueChange = { searchText.value = it },
@@ -549,6 +580,54 @@ class MainActivity : ComponentActivity() {
             if (loaded) Color(0xFF21AA72) else Color(0xFFE4A334), CircleShape))
     }
 
+
+    private fun activeSkills(): SkillCatalog =
+        if (notesEnabled.value) SkillCatalog(listOf(NotesSkill(store))) else SkillCatalog()
+
+    private fun refreshNotes() {
+        lifecycleScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { store.allNotes() }
+                notes.clear()
+                notes.addAll(saved)
+            } catch (e: Exception) {
+                notesError.value = "Falha ao consultar notas: " + (e.message ?: "desconhecida")
+            }
+        }
+    }
+
+    private fun setNotesSkillEnabled(checked: Boolean) {
+        if (responding.value || modelBusy.value || contextBusy.value) return
+        getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_NOTES, checked).apply()
+        notesEnabled.value = checked
+        nativeChatId = null
+        notesError.value = ""
+    }
+
+    private fun saveLocalNote(id: Long?, title: String, body: String) {
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { store.saveNote(id, title, body) }
+                notesError.value = ""
+                refreshNotes()
+            } catch (e: Exception) {
+                notesError.value = "Falha ao salvar nota: " + (e.message ?: "desconhecida")
+            }
+        }
+    }
+
+    private fun deleteLocalNote(id: Long) {
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { store.deleteNote(id) }
+                notesError.value = ""
+                refreshNotes()
+            } catch (e: Exception) {
+                notesError.value = "Falha ao excluir nota: " + (e.message ?: "desconhecida")
+            }
+        }
+    }
+
     private fun refreshConversations() {
         lifecycleScope.launch {
             try {
@@ -603,7 +682,9 @@ class MainActivity : ComponentActivity() {
                     (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
                     it.body.isNotBlank()
             }
-            engine.restoreConversation(harnessSystemPrompt(), replay.map { it.role }, replay.map { it.body })
+            engine.restoreConversation(
+                harnessSystemPrompt(activeSkills()), replay.map { it.role }, replay.map { it.body }
+            )
             if (selectedId.value == chatId) {
                 nativeChatId = chatId
                 engineStatus.value = "Modelo pronto • contexto restaurado"
@@ -716,11 +797,13 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             engine.restoreConversation(
-                                harnessSystemPrompt(), older.map { it.role }, older.map { it.body }
+                                harnessSystemPrompt(activeSkills()), older.map { it.role }, older.map { it.body }
                             )
                         },
                         operation = {
-                            HarnessTurnCoordinator(Lfm3Backend(engine)).run(
+                            HarnessTurnCoordinator(
+                                Lfm3Backend(engine), skills = activeSkills()
+                            ).run(
                                 user = content,
                                 onText = { visible ->
                                     if (visible != latest) {
@@ -891,7 +974,7 @@ class MainActivity : ComponentActivity() {
                 engine.loadModel(file.path)
             }
             engineStatus.value = "Inicializando conversa…"
-            withContext(Dispatchers.IO) { engine.setSystemPrompt(harnessSystemPrompt()) }
+            withContext(Dispatchers.IO) { engine.setSystemPrompt(harnessSystemPrompt(activeSkills())) }
             modelReady.value = true
             engineStatus.value = "Modelo pronto • offline"
             selectedId.value?.let { restoreContext(it) }
@@ -913,6 +996,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "LFM3Local"
         private const val PREF_MODEL = "model_path"
+        private const val PREF_NOTES = "skill.local.notes.enabled"
     }
 }
 
