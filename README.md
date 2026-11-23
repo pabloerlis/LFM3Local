@@ -60,7 +60,7 @@ experimentais do Preview. Não substitui uma assinatura de release segura e perm
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.5.0-preview-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45209048089). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.5.0-preview-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
@@ -116,3 +116,14 @@ Registre a mensagem de status ao ocorrer um erro. Para logs de depuração: `adb
 - `app:assembleDebug` concluída; `lib/arm64-v8a/libai-chat.so` verificada no APK.
 - Arquivo `app-debug.apk`: **67.658.783 bytes**; SHA-256 `0508249cc4ebd861fb38ed3aca1c8bb7055a7caaba8a914d9dd90db58e4c05aa`.
 - A análise ZIP do APK não encontrou erros de CRC. O binário **não foi testado com o modelo real** em um dispositivo físico.
+
+## Build Preview v0.5.0 — evidências de CI (23/11/2026)
+
+- GitHub Actions: [execução 45209048089](https://github.com/pabloerlis/LFM3Local/actions/runs/45209048089).
+- Suíte `app:testDebugUnitTest`: **aprovada**. O projeto contém 29 métodos de teste JUnit `@Test`.
+- Compilação nativa Android ARM64 `app:assembleDebug`: **aprovada**.
+- Biblioteca `libai-chat.so` e identificador `br.com.lfm3local.preview` conferidos na CI.
+- O APK foi extraído do artefato e testado como ZIP: **nenhum erro de integridade/CRC**.
+- Tamanho do APK: **67.768.795 bytes**.
+- SHA-256: `28cc964ff277ba54b3ef981c8e0fdd5f01a145d895b8501418775463a5a86dcf`.
+- **Não** houve execução com o GGUF real em um smartphone na infraestrutura de build.

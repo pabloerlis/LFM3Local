@@ -8,7 +8,7 @@ A tela **Skills** agora permite criar, editar e excluir notas no banco SQLite pr
 
 ## Roteiro em aparelho
 
-1. Instale o APK v0.5.0 em Android ARM64.
+1. Instale o APK v0.5.0 **Skills Beta** em Android ARM64, sem desinstalar o app antigo. O Beta usa `br.com.lfm3local.preview`, com banco e GGUF próprios.
 2. Na lista de conversas, toque em **Skills**.
 3. Crie uma nota intitulada **Bicicleta** com o texto **Verificar a pressão dos pneus no sábado**.
 4. Ative o controle **Notas locais**. O próprio botão constitui autorização para o modelo consultar suas notas.
@@ -36,3 +36,10 @@ A tela **Skills** agora permite criar, editar e excluir notas no banco SQLite pr
 - Desinstalar o APK apaga o SQLite local; a atualização precisa preservar a assinatura digital.
 - Apenas o modelo LFM3-1.7B GGUF selecionado pelo usuário é suportado no objetivo do MVP.
 - O mecanismo de seleção de ferramentas ainda recebe as definições por prompt textual com schemas. Suporte nativo integral do parâmetro `tools` no template LFM3 é uma próxima etapa de melhoria.
+
+## Artefato aprovado
+
+- [Pipeline v0.5.0 — 45209048089](https://github.com/pabloerlis/LFM3Local/actions/runs/45209048089), incluindo JUnit, C++/Kotlin e checagem do pacote Preview.
+- Pacote Android: `br.com.lfm3local.preview`.
+- APK SHA-256: `28cc964ff277ba54b3ef981c8e0fdd5f01a145d895b8501418775463a5a86dcf`.
+- Os testes JUnit não substituem a avaliação no aparelho: uso do modelo GGUF em hardware físico continua pendente.
