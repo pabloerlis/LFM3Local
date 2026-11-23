@@ -3,6 +3,7 @@ package com.arm.aichat.internal
 import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.NativeToolSchema
 import com.arm.aichat.UnsupportedArchitectureException
 import com.arm.aichat.ContextWindowFullException
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
@@ -116,6 +117,11 @@ internal class InferenceEngineImpl private constructor(
     ): Int
 
     @FastNative
+    private external fun configureToolsNative(
+        names: Array<String>, descriptions: Array<String>, schemas: Array<String>
+    ): Boolean
+
+    @FastNative
     private external fun unload()
 
     @FastNative
@@ -193,6 +199,27 @@ internal class InferenceEngineImpl private constructor(
                 _state.value = InferenceEngine.State.Error(e)
                 throw e
             }
+        }
+
+    override suspend fun configureToolSchemas(tools: List<NativeToolSchema>): Boolean =
+        withContext(llamaDispatcher) {
+            check(_state.value is InferenceEngine.State.ModelReady) {
+                "Tool schemas may only be registered when the engine is ready"
+            }
+            require(tools.size in 1..12) { "At least one and at most 12 tools are allowed" }
+            require(tools.map { it.name }.distinct().size == tools.size) { "Duplicate tool names" }
+            require(tools.all {
+                it.name.matches(Regex("[a-z][a-z0-9_]{0,63}")) &&
+                    it.description.length <= 300 && it.parameters.length <= 2048
+            }) { "Invalid native tool schema metadata" }
+            val configured = configureToolsNative(
+                tools.map { it.name }.toTypedArray(),
+                tools.map { it.description }.toTypedArray(),
+                tools.map { it.parameters }.toTypedArray()
+            )
+            Log.i(TAG, if (configured) "Native LFM3 Jinja tool schemas active"
+                else "Using compatibility text descriptions for tool schemas")
+            configured
         }
 
     override suspend fun restoreConversation(

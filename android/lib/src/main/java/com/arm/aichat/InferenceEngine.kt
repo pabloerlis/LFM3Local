@@ -25,6 +25,10 @@ interface InferenceEngine {
      */
     suspend fun setSystemPrompt(systemPrompt: String)
 
+    /** Registers allowlisted JSON schemas using the GGUF Jinja template.
+     * Returns false for older/incompatible chat templates (compatibility mode). */
+    suspend fun configureToolSchemas(tools: List<NativeToolSchema>): Boolean
+
     /** Restore previous role-separated turns without reloading the model. */
     suspend fun restoreConversation(systemPrompt: String, roles: List<String>, contents: List<String>)
 
@@ -96,3 +100,6 @@ class UnsupportedArchitectureException : Exception()
 
 /** The model is still loaded; callers may restore recent turns and retry once. */
 class ContextWindowFullException : Exception("A janela de contexto do modelo ficou cheia")
+
+/** Code-defined tool description; model/user text never creates new native functions. */
+data class NativeToolSchema(val name: String, val description: String, val parameters: String)
