@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.UnsupportedArchitectureException
+import com.arm.aichat.ContextWindowFullException
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
 import dalvik.annotation.optimization.FastNative
 import kotlinx.coroutines.CancellationException
@@ -260,9 +261,10 @@ internal class InferenceEngineImpl private constructor(
             _state.value = InferenceEngine.State.ProcessingUserPrompt
 
             processUserPrompt(message, predictLength).let { result ->
-                if (result != 0) {
-                    Log.e(TAG, "Failed to process user prompt: $result")
-                    return@flow
+                when (result) {
+                    0 -> Unit
+                    3 -> throw ContextWindowFullException()
+                    else -> throw IOException("Native prompt preparation failed: $result")
                 }
             }
 
@@ -280,6 +282,9 @@ internal class InferenceEngineImpl private constructor(
             }
             finalizePendingTurn()
             _state.value = InferenceEngine.State.ModelReady
+        } catch (e: ContextWindowFullException) {
+            _state.value = InferenceEngine.State.ModelReady
+            throw e
         } catch (e: CancellationException) {
             Log.i(TAG, "Assistant generation's flow collection cancelled.")
             withContext(kotlinx.coroutines.NonCancellable) { finalizePendingTurn() }
@@ -357,9 +362,11 @@ internal class InferenceEngineImpl private constructor(
                 }
 
                 is InferenceEngine.State.Error -> {
-                    Log.i(TAG, "Resetting error states...")
+                    Log.i(TAG, "Recovering from error by unloading model...")
+                    _readyForSystemPrompt = false
+                    _state.value = InferenceEngine.State.UnloadingModel
+                    unload()
                     _state.value = InferenceEngine.State.Initialized
-                    Log.i(TAG, "States reset!")
                     Unit
                 }
 

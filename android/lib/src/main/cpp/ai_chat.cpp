@@ -344,10 +344,11 @@ static int decode_tokens_in_batches(
         batch.clear();
         LOGv("%s: Preparing a batch size of %d starting at: %d", __func__, cur_batch_size, i);
 
-        // Shift context if current batch cannot fit into the context
+        // Never shift an in-progress batch using stale absolute token positions.
+        // The Android coordinator can rebuild recent turns from SQLite instead.
         if (start_pos + i + cur_batch_size >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
-            LOGw("%s: Current batch won't fit into context! Shifting...", __func__);
-            shift_context();
+            LOGe("%s: Context capacity exhausted before decode", __func__);
+            return 2;
         }
 
         // Add tokens to the batch with proper positions
@@ -482,7 +483,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processToolResponse(
         const bool has_template = common_chat_templates_was_explicit(g_chat_templates.get());
         const auto tokens = common_tokenize(g_context, formatted, has_template, has_template);
         if (tokens.empty() || tokens.size() > 256) return 4;
-        if ((size_t) current_position + tokens.size() + 12 >= DEFAULT_CONTEXT_SIZE) return 5;
+        if ((size_t) current_position + tokens.size() + (size_t)n_predict + 8 >=
+                DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) return 5;
         reset_short_term_states();
         if (decode_tokens_in_batches(g_context, g_batch, tokens, current_position, true)) return 6;
         chat_msgs.push_back(tool);
@@ -555,41 +557,45 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
 ) {
     // Reset short-term states
     reset_short_term_states();
+    if (n_predict <= 0 || n_predict > 2048) return 4;
 
     // Obtain and tokenize user prompt
     const auto *const user_prompt = env->GetStringUTFChars(juser_prompt, nullptr);
     LOGd("%s: User prompt received: \n%s", __func__, user_prompt);
-    std::string formatted_user_prompt(user_prompt);
-
-    // Format user prompt if applicable
+    common_chat_msg new_user;
+    new_user.role = ROLE_USER;
+    new_user.content = user_prompt;
     const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
-    if (has_chat_template) {
-        formatted_user_prompt = chat_add_and_format(ROLE_USER, user_prompt);
-    }
+    const std::string formatted_user_prompt = has_chat_template
+        ? common_chat_format_single(g_chat_templates.get(), chat_msgs, new_user, true, false)
+        : new_user.content;
     env->ReleaseStringUTFChars(juser_prompt, user_prompt);
 
-    // Decode formatted user prompts
+    // Do not mutate history before the prompt is checked and decoded.
     auto user_tokens = common_tokenize(g_context, formatted_user_prompt, has_chat_template, has_chat_template);
     for (auto id: user_tokens) {
         LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);
     }
 
-    // Ensure user prompt doesn't exceed the context size by truncating if necessary.
     const int user_prompt_size = (int) user_tokens.size();
-    const int max_batch_size = DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM;
-    if (user_prompt_size > max_batch_size) {
-        const int skipped_tokens = user_prompt_size - max_batch_size;
-        user_tokens.resize(max_batch_size);
-        LOGw("%s: User prompt too long! Skipped %d tokens!", __func__, skipped_tokens);
+    // Keep n_predict reserve. Return a recoverable code *without* changing KV
+    // or chat_msgs, so Kotlin can reconstruct the latest history and retry.
+    if (user_prompt_size <= 0 || user_prompt_size + n_predict + 8 >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
+        LOGe("%s: User prompt too large for context: %d tokens", __func__, user_prompt_size);
+        return 4;
+    }
+    if (current_position + user_prompt_size + n_predict + 8 >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
+        LOGw("%s: Context capacity reached: pos=%d prompt=%d reply=%d", __func__,
+            (int) current_position, user_prompt_size, (int) n_predict);
+        return 3;
     }
 
-    // Decode user tokens in batches
     if (decode_tokens_in_batches(g_context, g_batch, user_tokens, current_position, true)) {
         LOGe("%s: llama_decode() failed!", __func__);
         return 2;
     }
 
-    // Update position
+    chat_msgs.push_back(std::move(new_user));
     current_position += user_prompt_size;
     stop_generation_position = current_position + n_predict;
     return 0;
@@ -635,10 +641,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_generateNextToken(
         JNIEnv *env,
         jobject /*unused*/
 ) {
-    // Infinite text generation via context shifting
+    // Stop safely at capacity; never silently shift while decoding.
     if (current_position >= DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) {
-        LOGw("%s: Context full! Shifting...", __func__);
-        shift_context();
+        LOGw("%s: Context full, stopping safely for a history rebuild", __func__);
+        finalize_assistant_turn();
+        return nullptr;
     }
 
     // Stop if reaching the marked position

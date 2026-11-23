@@ -93,3 +93,6 @@ val State.isModelLoaded: Boolean
         this is State.Generating
 
 class UnsupportedArchitectureException : Exception()
+
+/** The model is still loaded; callers may restore recent turns and retry once. */
+class ContextWindowFullException : Exception("A janela de contexto do modelo ficou cheia")
