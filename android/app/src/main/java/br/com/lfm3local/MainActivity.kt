@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
+import br.com.lfm3local.harness.HarnessTurnCoordinator
+import br.com.lfm3local.harness.Lfm3Backend
+import br.com.lfm3local.harness.harnessSystemPrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -246,6 +249,8 @@ class MainActivity : ComponentActivity() {
         var menuExpanded by remember { mutableStateOf(false) }
         var renameOpen by remember { mutableStateOf(false) }
         var deleteOpen by remember { mutableStateOf(false) }
+        var activityOpen by remember { mutableStateOf(false) }
+        val toolEvents = remember(chatId) { mutableStateListOf<LocalToolEvent>() }
         var renameText by remember { mutableStateOf("") }
         val listState = rememberLazyListState()
         LaunchedEffect(chatId, entries.size, entries.lastOrNull()?.body?.length) {
@@ -283,6 +288,15 @@ class MainActivity : ComponentActivity() {
                             menuExpanded = false
                             renameText = selectedTitle.value
                             renameOpen = true
+                        })
+                        DropdownMenuItem(text = { Text("Atividade do harness") }, onClick = {
+                            menuExpanded = false
+                            activityOpen = true
+                            lifecycleScope.launch {
+                                val events = withContext(Dispatchers.IO) { store.toolEvents(chatId) }
+                                toolEvents.clear()
+                                toolEvents.addAll(events)
+                            }
                         })
                         DropdownMenuItem(text = { Text("Excluir conversa") }, onClick = {
                             menuExpanded = false
@@ -401,6 +415,42 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        if (activityOpen) {
+            AlertDialog(
+                onDismissRequest = { activityOpen = false },
+                title = { Text("Atividade do harness") },
+                text = {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                        Text("Somente ferramentas realmente chamadas aparecem aqui.",
+                            fontSize = 12.sp, color = muted)
+                        Spacer(Modifier.height(8.dp))
+                        if (toolEvents.isEmpty()) {
+                            Text("Nenhuma ferramenta executada nesta conversa.", color = muted)
+                        } else {
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(toolEvents, key = { it.id }) { event ->
+                                    Column {
+                                        Text(event.tool +
+                                            if (event.success) " • executada" else " • rejeitada",
+                                            fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        Text(event.parameters, fontSize = 12.sp, color = muted,
+                                            maxLines = 4)
+                                        Text(event.outcome, fontSize = 13.sp,
+                                            color = textDark, maxLines = 5)
+                                        Text(shortDate(event.timestamp) + " " + clockTime(event.timestamp),
+                                            fontSize = 10.sp, color = muted)
+                                        HorizontalDivider(color = dividerGrey)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { activityOpen = false }) { Text("Fechar") }
+                }
+            )
+        }
         if (renameOpen) {
             AlertDialog(
                 onDismissRequest = { renameOpen = false },
@@ -504,7 +554,7 @@ class MainActivity : ComponentActivity() {
                     (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
                     it.body.isNotBlank()
             }
-            engine.restoreConversation(SYSTEM_PROMPT, replay.map { it.role }, replay.map { it.body })
+            engine.restoreConversation(harnessSystemPrompt(), replay.map { it.role }, replay.map { it.body })
             if (selectedId.value == chatId) {
                 nativeChatId = chatId
                 engineStatus.value = "Modelo pronto • contexto restaurado"
@@ -574,7 +624,6 @@ class MainActivity : ComponentActivity() {
         engineStatus.value = "Preparando resposta…"
         generation = lifecycleScope.launch {
             var assistantId: Long? = null
-            val raw = StringBuilder()
             var latest = ""
             var checkpointLength = 0
             try {
@@ -590,23 +639,33 @@ class MainActivity : ComponentActivity() {
                 entries.add(LocalMessage(result.second, id, "assistant", "", "draft", System.currentTimeMillis()))
 
                 withContext(Dispatchers.Default) {
-                    engine.sendUserPrompt(content, predictLength = 512).collect { token ->
-                        raw.append(token)
-                        val visible = visibleAnswer(raw.toString())
-                        if (visible != latest) {
-                            latest = visible
-                            withContext(Dispatchers.Main) {
-                                replaceEntry(result.second, visible, "draft")
-                                engineStatus.value = "Gerando resposta…"
-                            }
-                            if (visible.length - checkpointLength >= 180) {
-                                withContext(Dispatchers.IO) {
-                                    store.updateMessage(result.second, id, visible, "draft")
+                    HarnessTurnCoordinator(Lfm3Backend(engine)).run(
+                        user = content,
+                        onText = { visible ->
+                            if (visible != latest) {
+                                latest = visible
+                                withContext(Dispatchers.Main) {
+                                    replaceEntry(result.second, visible, "draft")
                                 }
-                                checkpointLength = visible.length
+                                if (visible.length - checkpointLength >= 180) {
+                                    withContext(Dispatchers.IO) {
+                                        store.updateMessage(result.second, id, visible, "draft")
+                                    }
+                                    checkpointLength = visible.length
+                                }
+                            }
+                        },
+                        onStatus = { phase ->
+                            withContext(Dispatchers.Main) { engineStatus.value = phase }
+                        },
+                        onEvent = { event ->
+                            withContext(Dispatchers.IO) {
+                                store.appendToolEvent(
+                                    id, event.name, event.arguments, event.outcome, event.success
+                                )
                             }
                         }
-                    }
+                    )
                 }
                 val complete = if (latest.isNotBlank()) "complete" else "error"
                 if (latest.isBlank()) latest = "O modelo não produziu texto visível."
@@ -717,7 +776,7 @@ class MainActivity : ComponentActivity() {
                 engine.loadModel(file.path)
             }
             engineStatus.value = "Inicializando conversa…"
-            withContext(Dispatchers.IO) { engine.setSystemPrompt(SYSTEM_PROMPT) }
+            withContext(Dispatchers.IO) { engine.setSystemPrompt(harnessSystemPrompt()) }
             modelReady.value = true
             engineStatus.value = "Modelo pronto • offline"
             selectedId.value?.let { restoreContext(it) }
@@ -739,11 +798,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "LFM3Local"
         private const val PREF_MODEL = "model_path"
-        private const val SYSTEM_PROMPT =
-            "Você é o LFM3Local, assistente profissional offline. Responda de forma natural e direta " +
-            "em português quando a conversa estiver em português. Preserve o contexto anterior, " +
-            "não repita perguntas já respondidas e não afirme ter usado ferramentas ou internet. " +
-            "Declare incertezas com clareza. Você não é um personagem nem um assistente de roleplay."
     }
 }
 
