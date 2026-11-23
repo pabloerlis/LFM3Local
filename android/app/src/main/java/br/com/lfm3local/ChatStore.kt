@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import br.com.lfm3local.harness.NoteRecord
+import br.com.lfm3local.harness.NoteSource
 
 /** Private, offline-only storage. It is not synced or exported to other apps. */
 data class LocalConversation(
@@ -35,8 +37,8 @@ data class LocalToolEvent(
 
 /** All calls must be dispatched off the Android UI thread. */
 class ChatStore(context: Context) : SQLiteOpenHelper(
-    context.applicationContext, "lfm3local_history.db", null, 2
-) {
+    context.applicationContext, "lfm3local_history.db", null, 3
+), NoteSource {
     override fun onConfigure(db: SQLiteDatabase) {
         db.setForeignKeyConstraintsEnabled(true)
     }
@@ -64,6 +66,7 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
         db.execSQL("CREATE INDEX messages_by_chat ON messages(chat_id, id)")
         db.execSQL("CREATE INDEX conversations_recent ON conversations(updated_ms DESC)")
         createToolEventsTable(db)
+        createNotesTable(db)
     }
 
     private fun createToolEventsTable(db: SQLiteDatabase) {
@@ -81,10 +84,21 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
         db.execSQL("CREATE INDEX tool_events_by_chat ON tool_events(chat_id, id)")
     }
 
+    private fun createNotesTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE local_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                updated_ms INTEGER NOT NULL
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX local_notes_recent ON local_notes(updated_ms DESC)")
+    }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2 && newVersion >= 2) {
-            createToolEventsTable(db)
-        }
+        if (oldVersion < 2 && newVersion >= 2) createToolEventsTable(db)
+        if (oldVersion < 3 && newVersion >= 3) createNotesTable(db)
     }
 
     /** A process may die during token streaming; mark such turns as interrupted. */
@@ -196,6 +210,54 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
             }
         }
         return result
+    }
+
+    /** Personal notes persist independently of individual chats. */
+    override fun allNotes(): List<NoteRecord> {
+        val result = mutableListOf<NoteRecord>()
+        readableDatabase.query(
+            "local_notes", arrayOf("id", "title", "body", "updated_ms"),
+            null, null, null, null, "updated_ms DESC, id DESC", "250"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result.add(NoteRecord(
+                    cursor.getLong(0), cursor.getString(1),
+                    cursor.getString(2), cursor.getLong(3)
+                ))
+            }
+        }
+        return result
+    }
+
+    fun saveNote(id: Long?, title: String, body: String): Long {
+        val cleanTitle = title.trim()
+        val cleanBody = body.trim()
+        require(cleanTitle.length in 1..80) { "Título deve ter de 1 a 80 caracteres" }
+        require(cleanBody.length in 1..2000) { "Texto deve ter de 1 a 2000 caracteres" }
+        val db = writableDatabase
+        if (id == null) {
+            db.rawQuery("SELECT COUNT(*) FROM local_notes", null).use {
+                check(it.moveToFirst() && it.getInt(0) < 250) { "Limite de 250 notas atingido" }
+            }
+        }
+        val values = ContentValues().apply {
+            put("title", cleanTitle)
+            put("body", cleanBody)
+            put("updated_ms", System.currentTimeMillis())
+        }
+        if (id == null) {
+            val inserted = db.insertOrThrow("local_notes", null, values)
+            check(inserted > 0) { "Falha ao salvar nota" }
+            return inserted
+        }
+        check(db.update("local_notes", values, "id=?", arrayOf(id.toString())) == 1) {
+            "Nota não encontrada"
+        }
+        return id
+    }
+
+    fun deleteNote(id: Long) {
+        writableDatabase.delete("local_notes", "id=?", arrayOf(id.toString()))
     }
 
     fun rename(chatId: Long, title: String) {
