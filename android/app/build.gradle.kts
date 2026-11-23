@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.lfm3local"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-mvp"
+        versionCode = 2
+        versionName = "0.2.0-chat-history"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
