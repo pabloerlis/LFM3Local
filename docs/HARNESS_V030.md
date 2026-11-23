@@ -62,3 +62,14 @@ O GitHub Actions executa `gradle :app:testDebugUnitTest` e depois `gradle :app:a
 - Prover medição de TTFT/tokens/s por turno e diagnósticos sem travamento silencioso.
 - Adicionar skills isoladas e ferramenta `search_local_notes` com permissões.
 - Executar smoke tests físicos e, quando possível, benchmarks repetíveis.
+
+## Resultado da validação automatizada — 23/11/2026
+
+- [GitHub Actions — execução 45200045261](https://github.com/pabloerlis/LFM3Local/actions/runs/45200045261): **SUCESSO**.
+- `:app:testDebugUnitTest`: **BUILD SUCCESSFUL**, em execução automatizada.
+- `:app:assembleDebug`: **BUILD SUCCESSFUL**.
+- Verificação de `lib/arm64-v8a/libai-chat.so`: **SUCESSO**.
+- Artefato: `LFM3Local-Harness-v0.3.0-debug-APK`, com modelo externo.
+- Integridade do APK extraído: arquivo ZIP íntegro, sem erros; SHA-256 do APK `f7ceae4bff22069724b6009e89040631aa1e174c75e94bd796b7b97e0e845130`.
+
+**Validação não realizada:** nenhuma execução do LFM3-1.7B GGUF em smartphone foi observada nesta etapa. A passagem de ferramentas ao modelo por prompt e o JNI de continuação precisam de teste real em hardware.
