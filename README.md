@@ -5,7 +5,7 @@ Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com inte
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Builds e artefatos de APK no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-MVP-debug-APK** e extraia `app-debug.apk`.
+- [Build aprovado da versão 0.2.0 (APK)](https://github.com/pabloerlis/LFM3Local/actions/runs/45195314481). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-MVP-debug-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
