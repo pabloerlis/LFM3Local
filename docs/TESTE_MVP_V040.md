@@ -45,3 +45,15 @@ Para cada defeito: versão do APK, nome exato do GGUF, captura da tela, status m
 - Uma janela de contexto cheia reduz quantas mensagens antigas o modelo pode usar, mas **não remove** mensagens armazenadas em SQLite.
 - O aviso por 15 segundos indica ausência de progresso visível no harness, não comprova um travamento nativo.
 - Nenhum recurso de terceiros recebe permissão para executar código arbitrário. As ferramentas atuais são restritas à calculadora e à data/hora local.
+
+## Resultado do pipeline de release
+
+| Evidência | Resultado |
+|---|---|
+| CI [45203997728](https://github.com/pabloerlis/LFM3Local/actions/runs/45203997728) | SUCCESS |
+| JUnit `app:testDebugUnitTest` | SUCCESS; 19 métodos de teste `@Test` |
+| Gradle `app:assembleDebug` | SUCCESS |
+| Empacotamento `libai-chat.so` ARM64 | SUCCESS |
+| Integridade ZIP/CRC do APK | SUCCESS |
+| SHA-256 do APK | `0508249cc4ebd861fb38ed3aca1c8bb7055a7caaba8a914d9dd90db58e4c05aa` |
+| Teste real com `LFM3-1.7B-Q4_K_M.gguf` no Android | **PENDENTE** |

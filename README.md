@@ -31,7 +31,7 @@ O modelo pode chamar ferramentas locais usando o formato XML do LFM3: `<tool_cal
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.4.0-debug-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45203997728). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.4.0-debug-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
@@ -79,3 +79,11 @@ O runtime e o exemplo de integração foram adaptados do [llama.cpp](https://git
 ## Diagnóstico
 
 Registre a mensagem de status ao ocorrer um erro. Para logs de depuração: `adb logcat -s LFM3Local llama.cpp ai-chat`. Inclua versão do aparelho, variante do GGUF e sequência que reproduz a falha.
+
+## Resultado verificável do build v0.4.0 (23/11/2026)
+
+- [GitHub Actions 45203997728](https://github.com/pabloerlis/LFM3Local/actions/runs/45203997728): **success**.
+- **19 testes JUnit declarados** no projeto; tarefa `app:testDebugUnitTest` executada com sucesso.
+- `app:assembleDebug` concluída; `lib/arm64-v8a/libai-chat.so` verificada no APK.
+- Arquivo `app-debug.apk`: **67.658.783 bytes**; SHA-256 `0508249cc4ebd861fb38ed3aca1c8bb7055a7caaba8a914d9dd90db58e4c05aa`.
+- A análise ZIP do APK não encontrou erros de CRC. O binário **não foi testado com o modelo real** em um dispositivo físico.
