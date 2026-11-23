@@ -40,6 +40,8 @@ import br.com.lfm3local.harness.retryOnceWhenContextFull
 import br.com.lfm3local.harness.TurnProfiler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -50,6 +52,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 private val deepGreen = Color(0xFF075E54)
 private val brightGreen = Color(0xFF008069)
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private val draft = mutableStateOf("")
     private val engineStatus = mutableStateOf("Iniciando mecanismo local…")
     private val lastTurnTelemetry = mutableStateOf("")
+    private val runtimeStage = mutableStateOf("Iniciando")
     private val modelReady = mutableStateOf(false)
     private val modelBusy = mutableStateOf(true)
     private val contextBusy = mutableStateOf(false)
@@ -95,6 +99,23 @@ class MainActivity : ComponentActivity() {
             try {
                 engine = withContext(Dispatchers.IO) {
                     AiChat.getInferenceEngine(applicationContext)
+                }
+                lifecycleScope.launch {
+                    engine.state.collect { state ->
+                        runtimeStage.value = when (state) {
+                            is InferenceEngine.State.Uninitialized -> "Nativo não iniciado"
+                            is InferenceEngine.State.Initializing -> "Inicializando biblioteca"
+                            is InferenceEngine.State.Initialized -> "Sem modelo"
+                            is InferenceEngine.State.LoadingModel -> "Carregando GGUF"
+                            is InferenceEngine.State.UnloadingModel -> "Liberando modelo"
+                            is InferenceEngine.State.ModelReady -> "Aguardando mensagem"
+                            is InferenceEngine.State.ProcessingUserPrompt -> "Processando prompt"
+                            is InferenceEngine.State.ProcessingSystemPrompt -> "Preparando contexto"
+                            is InferenceEngine.State.Generating -> "Decodificando tokens"
+                            is InferenceEngine.State.Benchmarking -> "Executando benchmark"
+                            is InferenceEngine.State.Error -> "Erro do mecanismo"
+                        }
+                    }
                 }
                 val path = getPreferences(MODE_PRIVATE).getString(PREF_MODEL, null)
                 if (path != null && File(path).isFile) {
@@ -172,6 +193,8 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.weight(1f)) {
                         Text(engineStatus.value, color = muted, fontSize = 12.sp,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("Motor: " + runtimeStage.value, color = deepGreen, fontSize = 10.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (lastTurnTelemetry.value.isNotBlank()) {
                             Text(lastTurnTelemetry.value, color = muted, fontSize = 10.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -286,9 +309,10 @@ class MainActivity : ComponentActivity() {
                         color = Color.White, fontSize = 17.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        if (responding.value) "Gerando resposta…"
-                        else if (contextBusy.value) "Restaurando contexto…"
-                        else if (modelReady.value) "IA local • disponível" else "Modelo não carregado",
+                        if (responding.value || contextBusy.value || modelBusy.value)
+                            runtimeStage.value
+                        else if (modelReady.value) "IA local • disponível"
+                        else "Modelo não carregado",
                         fontSize = 12.sp, color = Color(0xFFD6EDE7)
                     )
                 }
@@ -651,6 +675,17 @@ class MainActivity : ComponentActivity() {
         lastTurnTelemetry.value = ""
         generation = lifecycleScope.launch {
             val profiler = TurnProfiler { SystemClock.elapsedRealtime() }
+            val lastProgress = AtomicLong(SystemClock.elapsedRealtime())
+            val watchdog = launch {
+                while (isActive) {
+                    delay(3000)
+                    val seconds = (SystemClock.elapsedRealtime() - lastProgress.get()) / 1000L
+                    if (seconds >= 15L && responding.value) {
+                        engineStatus.value = "Sem progresso há " + seconds +
+                            "s • " + runtimeStage.value + ". Pode estar processando ou travado."
+                    }
+                }
+            }
             var assistantId: Long? = null
             var latest = ""
             var checkpointLength = 0
@@ -689,6 +724,7 @@ class MainActivity : ComponentActivity() {
                                 user = content,
                                 onText = { visible ->
                                     if (visible != latest) {
+                                        lastProgress.set(SystemClock.elapsedRealtime())
                                         latest = visible
                                         val stats = profiler.textVisible(visible).shortText()
                                         withContext(Dispatchers.Main) {
@@ -704,9 +740,11 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onStatus = { phase ->
+                                    lastProgress.set(SystemClock.elapsedRealtime())
                                     withContext(Dispatchers.Main) { engineStatus.value = phase }
                                 },
                                 onEvent = { event ->
+                                    lastProgress.set(SystemClock.elapsedRealtime())
                                     withContext(Dispatchers.IO) {
                                         store.appendToolEvent(
                                             id, event.name, event.arguments, event.outcome, event.success
@@ -750,6 +788,7 @@ class MainActivity : ComponentActivity() {
                 nativeChatId = null
                 modelReady.value = engine.state.value is InferenceEngine.State.ModelReady
             } finally {
+                watchdog.cancel()
                 generation = null
                 responding.value = false
                 refreshConversations()
