@@ -40,7 +40,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
-          key: lfm3local-preview-debug-keystore-v1
+          key: lfm3local-nativepreview-debug-keystore-v1
+      - name: Ensure persistent native Preview Debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android               -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048               -validity 3650 -dname "CN=LFM3Local Native Preview, OU=Testing, O=LFM3Local, C=BR"               -noprompt
+          fi
+          test -s "$HOME/.android/debug.keystore"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
@@ -62,10 +69,10 @@ jobs:
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libai-chat.so'
       - name: Verify side-by-side Preview applicationId
         run: |
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/debug/app-debug.apk | grep "package: name='br.com.lfm3local.preview'"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/debug/app-debug.apk | grep "package: name='br.com.lfm3local.nativepreview'"
       - uses: actions/upload-artifact@v4
         with:
-          name: LFM3Local-Harness-v0.6.0-preview-APK
+          name: LFM3Local-Harness-v0.6.1-nativepreview-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30

@@ -11,12 +11,12 @@ android {
         applicationId = "br.com.lfm3local"
         minSdk = 30
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.6.0-native-tools"
+        versionCode = 7
+        versionName = "0.6.1-native-tools"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
-        debug { applicationIdSuffix = ".preview" }
+        debug { applicationIdSuffix = ".nativepreview" }
         release { isMinifyEnabled = false }
     }
     buildFeatures { compose = true }

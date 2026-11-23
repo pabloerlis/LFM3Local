@@ -1,6 +1,15 @@
-# LFM3Local — Android Harness MVP 0.6.0
+# LFM3Local — Android Harness MVP 0.6.1
 
 Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com chat estilo mensageiro, histórico local e **harness inicial de ferramentas** via `llama.cpp`.
+
+
+## Aviso de instalação da versão 0.6.1
+
+A versão 0.6.1 usa um **pacote Android diferente**: `br.com.lfm3local.nativepreview`, identificado como **LFM3Local Native Beta**. Ela não substitui a versão anterior `br.com.lfm3local.preview`. Ambas podem coexistir e o banco de mensagens/notas antigo permanece intacto no outro aplicativo.
+
+A v0.6.1 possui armazenamento próprio. Para testar com LFM3, importe o GGUF novamente nesta versão, com espaço para a cópia. Não desinstale seu aplicativo anterior para realizar o teste.
+
+**Motivo:** o pipeline das versões 0.5/0.6 não recuperou a chave Debug anterior (confirmado nos logs do GitHub Actions), então atualizar diretamente poderia falhar pela diferença de assinaturas. A partir desta versão, o CI cria uma chave de teste no local esperado e a salva no cache do workflow para os builds experimentais seguintes. Chaves de Debug cacheadas **não garantem estabilidade permanente** e não substituem chave de release protegida em Secrets.
 
 ## Harness v0.6.0 — JSON Schemas nativos do LFM3
 
@@ -60,7 +69,7 @@ O modelo pode chamar ferramentas locais usando o formato XML do LFM3: `<tool_cal
 
 ## Instalação de teste sem apagar a versão anterior
 
-A versão 0.5.0 é distribuída como **LFM3Local Skills Beta** com identificador Android
+A versão 0.5.0 foi distribuída como **LFM3Local Skills Beta** com identificador Android
 `br.com.lfm3local.preview`. Ela pode ser instalada **ao lado do LFM3Local antigo**
 (`br.com.lfm3local`), sem exigir desinstalação.
 
@@ -75,7 +84,7 @@ experimentais do Preview. Não substitui uma assinatura de release segura e perm
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.0-preview-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.1-nativepreview-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
