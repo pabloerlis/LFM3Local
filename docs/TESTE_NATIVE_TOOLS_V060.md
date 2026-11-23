@@ -6,7 +6,9 @@ Verificar, em dispositivo Android real, se registrar schemas pelo chat template 
 
 **Referência oficial:** [Liquid AI — LFM3-1.7B, Tool Calling](https://huggingface.co/LiquidAI/LFM3-1.7B/blob/main/README.md#tool-calling) e [chat_template.jinja](https://huggingface.co/LiquidAI/LFM3-1.7B/blob/main/chat_template.jinja).
 
-O APK tem o identificador `br.com.lfm3local.preview` e instala ao lado do aplicativo principal. Ele mantém seu próprio SQLite/arquivo GGUF, sem migrar dados do aplicativo principal.
+A entrega de teste corrigida é a **v0.6.1**, identificada por `br.com.lfm3local.nativepreview` e exibida no Android como **LFM3Local Native Beta**. Ela instala ao lado do aplicativo principal e também do Skills Beta v0.5 (`br.com.lfm3local.preview`), sem apagar os bancos anteriores. O novo pacote usa SQLite/arquivo GGUF próprios, sem migrar dados. É necessário importar o GGUF novamente.
+
+A mudança de identificador é deliberada: o cache de assinatura Debug das versões 0.5 e 0.6 não foi recuperado no CI. **Nunca desinstale a versão antiga apenas para testar o novo harness.**
 
 ## Estados exibidos
 
