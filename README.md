@@ -177,3 +177,13 @@ Registre a mensagem de status ao ocorrer um erro. Para logs de depuração: `adb
 - Arquivo APK: **67.922.763 bytes**; SHA-256 `82ecda545b57e0e059588bbfea3ed3d606eeecb7bcbb93790619acee96d7489d`.
 - A chave Debug de teste foi criada e **armazenada no cache do GitHub Actions**, confirmada no log. Cache pode expirar; release permanente exigirá secrets próprios.
 - **Não houve teste com o GGUF real no aparelho** durante este build.
+
+## Validação v0.7.0 — 23/11/2026
+
+- [GitHub Actions 45223427255](https://github.com/pabloerlis/LFM3Local/actions/runs/45223427255): **SUCCESS**.
+- **38 testes JUnit** no projeto; `app:testDebugUnitTest` aprovado.
+- `app:assembleDebug` aprovado (Kotlin/C++/JNI), incluindo 8 bibliotecas ARM64.
+- Identificador Android **`br.com.lfm3local.nativepreview`** verificado no CI.
+- APK extraído do artefato, ZIP e CRC íntegros; tamanho **68.012.755 bytes**, SHA-256 `a4d6740b244bf5b2e790eaa010d1346389b1e674a313c2fd7d237bb0d70f7c52`.
+- **Chave Debug de teste restaurada do cache anterior com sucesso** (`lfm3local-nativepreview-debug-keystore-v1`, confirmado no log), permitindo atualização do Native Beta 0.6.1 sem alteração planejada da assinatura.
+- O tempo de restauração e a proporção de acertos no cache **não foram medidos no dispositivo**; o ganho esperado deve ser validado por testes A → B → A no smartphone.

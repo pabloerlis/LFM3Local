@@ -53,3 +53,13 @@ A melhoria é **uma hipótese de desempenho para confirmar no hardware**. Builds
 ## Compatibilidade do APK
 
 O Android ID é `br.com.lfm3local.nativepreview`, igual ao Native Beta v0.6.1. Ele usa a assinatura Debug de teste guardada na CI. O aplicativo principal e o Skills Beta antigo têm IDs próprios e permanecem instalados. Se ocorrer incompatibilidade de assinatura, **não desinstale sem preservar os dados do Native Beta**.
+
+## Validação v0.7.0 — 23/11/2026
+
+- [GitHub Actions 45223427255](https://github.com/pabloerlis/LFM3Local/actions/runs/45223427255): **SUCCESS**.
+- **38 testes JUnit** no projeto; `app:testDebugUnitTest` aprovado.
+- `app:assembleDebug` aprovado (Kotlin/C++/JNI), incluindo 8 bibliotecas ARM64.
+- Identificador Android **`br.com.lfm3local.nativepreview`** verificado no CI.
+- APK extraído do artefato, ZIP e CRC íntegros; tamanho **68.012.755 bytes**, SHA-256 `a4d6740b244bf5b2e790eaa010d1346389b1e674a313c2fd7d237bb0d70f7c52`.
+- **Chave Debug de teste restaurada do cache anterior com sucesso** (`lfm3local-nativepreview-debug-keystore-v1`, confirmado no log), permitindo atualização do Native Beta 0.6.1 sem alteração planejada da assinatura.
+- O tempo de restauração e a proporção de acertos no cache **não foram medidos no dispositivo**; o ganho esperado deve ser validado por testes A → B → A no smartphone.
