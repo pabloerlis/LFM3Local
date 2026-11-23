@@ -1,6 +1,19 @@
-# LFM3Local — Android Harness MVP 0.3.0
+# LFM3Local — Android Harness MVP 0.4.0
 
 Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com chat estilo mensageiro, histórico local e **harness inicial de ferramentas** via `llama.cpp`.
+
+## Harness v0.4.0 — confiabilidade e observabilidade
+
+A versão 0.4 mantém o chat, o histórico SQLite e as ferramentas da 0.3, e acrescenta:
+
+- **Recuperação automática da janela de contexto:** o motor interrompe de forma segura um prompt que não cabe, reconstrói os últimos turnos do histórico local e tenta a mesma pergunta mais uma vez. Não fica em loop infinito. Conversas antigas permanecem armazenadas, mas turnos mais antigos podem sair dos 4096 tokens ativos.
+- **Correção de estados nativos:** erros de preparo de prompt passam a ser sinalizados; não deixam o motor silenciosamente preso em "Processando prompt". Falhas recuperáveis e fatais são distintas.
+- **Cancelamento seguro:** depois de interromper uma geração, o aplicativo reconstrói o contexto antes da próxima mensagem.
+- **Recuperação manual do modelo:** botão "Recarregar" em caso de erro; limpeza nativa protegida quando o carregamento falha parcialmente.
+- **Diagnósticos visíveis:** estados reais do motor (processando prompt, decodificando tokens, carregando GGUF); aviso quando não há progresso; tempo até o primeiro texto, taxa de caracteres/s e quantidade de ferramentas executadas.
+- **Testes de confiabilidade:** reconstrução permitida uma só vez, propagação de erros, medição monotônica, mantendo os testes anteriores do parser, da calculadora e do coordenador.
+
+**Limite:** a taxa em caracteres/s não deve ser confundida com tokens/s; não foi feita medição de desempenho físico nem execução com o GGUF real neste ambiente. Um aviso de ausência de progresso não comprova travamento.
 
 ## Harness 0.3.0 — primeira etapa
 
@@ -18,7 +31,7 @@ O modelo pode chamar ferramentas locais usando o formato XML do LFM3: `<tool_cal
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45200045261). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.3.0-debug-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.4.0-debug-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
