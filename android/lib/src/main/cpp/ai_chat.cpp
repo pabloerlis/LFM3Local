@@ -3,6 +3,9 @@
 #include <iomanip>
 #include <cmath>
 #include <string>
+#include <chrono>
+#include <stdexcept>
+#include <utility>
 #include <unistd.h>
 #include <sampling.h>
 
@@ -289,12 +292,129 @@ static void shift_context() {
     LOGi("%s: Context shifting done! Current position: %d", __func__, current_position);
 }
 
+
+// Native schema mode uses the GGUF's LFM3 Jinja chat template. It is optional:
+// older GGUFs without the required tool support keep the previous prompt path.
+static std::vector<common_chat_tool> g_native_tool_specs;
+static bool g_native_tool_mode = false;
+static std::chrono::system_clock::time_point g_template_timestamp = std::chrono::system_clock::now();
+
+static std::string render_native_chat(
+        const std::vector<common_chat_msg> & messages,
+        bool add_generation_prompt) {
+    common_chat_templates_inputs inputs;
+    inputs.messages = messages;
+    inputs.tools = g_native_tool_specs;
+    inputs.use_jinja = true;
+    inputs.add_generation_prompt = add_generation_prompt;
+    // Suppress unnecessary thinking-prefix generation on mobile. Preserve the
+    // already-rendered assistant content so incremental token prefixes match.
+    inputs.enable_thinking = false;
+    inputs.chat_template_kwargs["preserve_thinking"] = "true";
+    inputs.now = g_template_timestamp;
+    return common_chat_templates_apply(g_chat_templates.get(), inputs).prompt.str();
+}
+
+static std::string format_with_native_tools(
+        const std::vector<common_chat_msg> & past,
+        const common_chat_msg & new_msg, bool add_ass) {
+    if (!g_native_tool_mode) {
+        return common_chat_format_single(
+            g_chat_templates.get(), past, new_msg, add_ass, false);
+    }
+    const std::string before = past.empty() ? "" : render_native_chat(past, false);
+    auto after = past;
+    after.push_back(new_msg);
+    const std::string rendered = render_native_chat(after, add_ass);
+    if (rendered.compare(0, before.size(), before) != 0) {
+        throw std::runtime_error("LFM3 Jinja tool prompt is not append-only");
+    }
+    return rendered.substr(before.size());
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_configureToolsNative(
+        JNIEnv *env, jobject, jobjectArray jnames,
+        jobjectArray jdescriptions, jobjectArray jschemas) {
+    g_native_tool_mode = false;
+    g_native_tool_specs.clear();
+    if (!g_chat_templates || !g_model) return JNI_FALSE;
+    const jsize count = env->GetArrayLength(jnames);
+    if (count > 12 || env->GetArrayLength(jdescriptions) != count ||
+        env->GetArrayLength(jschemas) != count) return JNI_FALSE;
+
+    // LFM3's template must support both <tools> and <tool_response>.
+    // A "chatml" fallback cannot safely expose native schemas.
+    const std::string source = common_chat_templates_source(g_chat_templates.get());
+    if (source.find("<additional_tools>") == std::string::npos ||
+        source.find("<tool_response>") == std::string::npos) {
+        LOGw("GGUF lacks native LFM3 tools chat template; using compatibility path");
+        return JNI_FALSE;
+    }
+
+    std::vector<common_chat_tool> candidates;
+    try {
+        for (jsize i = 0; i < count; ++i) {
+            auto jname = static_cast<jstring>(env->GetObjectArrayElement(jnames, i));
+            auto jdesc = static_cast<jstring>(env->GetObjectArrayElement(jdescriptions, i));
+            auto jschema = static_cast<jstring>(env->GetObjectArrayElement(jschemas, i));
+            if (!jname || !jdesc || !jschema) return JNI_FALSE;
+            const char *cn = env->GetStringUTFChars(jname, nullptr);
+            const char *cd = env->GetStringUTFChars(jdesc, nullptr);
+            const char *cs = env->GetStringUTFChars(jschema, nullptr);
+            common_chat_tool tool;
+            tool.name = cn;
+            tool.description = cd;
+            tool.parameters = cs;
+            env->ReleaseStringUTFChars(jname, cn);
+            env->ReleaseStringUTFChars(jdesc, cd);
+            env->ReleaseStringUTFChars(jschema, cs);
+            env->DeleteLocalRef(jname);
+            env->DeleteLocalRef(jdesc);
+            env->DeleteLocalRef(jschema);
+            if (tool.name.empty() || tool.name.size() > 64 ||
+                tool.description.size() > 300 || tool.parameters.size() > 2048)
+                return JNI_FALSE;
+            candidates.push_back(std::move(tool));
+        }
+        g_native_tool_specs = std::move(candidates);
+        g_template_timestamp = std::chrono::system_clock::now();
+
+        common_chat_msg system;
+        system.role = "system";
+        system.content = "You are an offline assistant.";
+        common_chat_msg user;
+        user.role = "user";
+        user.content = "Test";
+        const std::string probe = render_native_chat({system, user}, true);
+        if (probe.find("<tools>") == std::string::npos ||
+            probe.find("<|im_start|>assistant") == std::string::npos) {
+            g_native_tool_specs.clear();
+            LOGw("Template does not render native tools; falling back to compat mode");
+            return JNI_FALSE;
+        }
+        for (const auto & tool : g_native_tool_specs) {
+            if (probe.find(tool.name) == std::string::npos) {
+                g_native_tool_specs.clear();
+                return JNI_FALSE;
+            }
+        }
+        g_native_tool_mode = true;
+        LOGi("LFM3 native tools enabled: %d schemas", (int) g_native_tool_specs.size());
+        return JNI_TRUE;
+    } catch (const std::exception & ex) {
+        LOGw("LFM3 Jinja tools validation failed: %s", ex.what());
+        g_native_tool_specs.clear();
+        return JNI_FALSE;
+    }
+}
+
 static std::string chat_add_and_format(const std::string &role, const std::string &content) {
     common_chat_msg new_msg;
     new_msg.role = role;
     new_msg.content = content;
-    auto formatted = common_chat_format_single(
-            g_chat_templates.get(), chat_msgs, new_msg, role == ROLE_USER, /* use_jinja */ false);
+    auto formatted = format_with_native_tools(chat_msgs, new_msg, role == ROLE_USER);
     chat_msgs.push_back(new_msg);
     LOGi("%s: Formatted and added %s message: \n%s\n", __func__, role.c_str(), formatted.c_str());
     return formatted;
@@ -417,12 +537,16 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_restoreConversationNative(
             selected.insert(selected.end(), saved.begin() + first, saved.end());
             std::vector<common_chat_msg> prefix;
             std::string rendered;
-            for (const auto &msg : selected) {
-                rendered += common_chat_format_single(
-                    g_chat_templates.get(), prefix, msg, false, false);
-                prefix.push_back(msg);
+            if (g_native_tool_mode) {
+                rendered = render_native_chat(selected, false);
+            } else {
+                for (const auto &msg : selected) {
+                    rendered += common_chat_format_single(
+                        g_chat_templates.get(), prefix, msg, false, false);
+                    prefix.push_back(msg);
+                }
             }
-            tokens = common_tokenize(g_context, rendered, true, true);
+            tokens = common_tokenize(g_context, rendered, !g_native_tool_mode, true);
             // Leave room for the next prompt and 512 generated tokens.
             if (tokens.size() <= DEFAULT_CONTEXT_SIZE - 1536) break;
             if (first >= saved.size()) return 5;
@@ -435,10 +559,11 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_restoreConversationNative(
         reset_short_term_states();
         common_sampler_reset(g_sampler);
 
-        const std::string sys_formatted =
-            common_chat_format_single(g_chat_templates.get(), {}, selected.front(), false, false);
+        const std::string sys_formatted = g_native_tool_mode
+            ? render_native_chat({selected.front()}, false)
+            : common_chat_format_single(g_chat_templates.get(), {}, selected.front(), false, false);
         system_prompt_position = (llama_pos) common_tokenize(
-            g_context, sys_formatted, true, true).size();
+            g_context, sys_formatted, !g_native_tool_mode, true).size();
         if (decode_tokens_in_batches(g_context, g_batch, tokens, 0, true)) {
             reset_long_term_states();
             return 6;
@@ -479,10 +604,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processToolResponse(
     tool.content = result;
 
     try {
-        const std::string formatted = common_chat_format_single(
-            g_chat_templates.get(), chat_msgs, tool, true, false);
-        const bool has_template = common_chat_templates_was_explicit(g_chat_templates.get());
-        const auto tokens = common_tokenize(g_context, formatted, has_template, has_template);
+        const std::string formatted = format_with_native_tools(chat_msgs, tool, true);
+        const auto tokens = common_tokenize(g_context, formatted, false, true);
         if (tokens.empty() || tokens.size() > 256) return 4;
         if ((size_t) current_position + tokens.size() + (size_t)n_predict + 8 >=
                 DEFAULT_CONTEXT_SIZE - OVERFLOW_HEADROOM) return 5;
@@ -524,7 +647,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(
 
     // Tokenize system prompt
     const auto system_tokens = common_tokenize(g_context, formatted_system_prompt,
-                                               has_chat_template, has_chat_template);
+                                               has_chat_template && !g_native_tool_mode, has_chat_template || g_native_tool_mode);
     for (auto id: system_tokens) {
         LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);
     }
@@ -567,13 +690,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processUserPrompt(
     new_user.role = ROLE_USER;
     new_user.content = user_prompt;
     const bool has_chat_template = common_chat_templates_was_explicit(g_chat_templates.get());
-    const std::string formatted_user_prompt = has_chat_template
-        ? common_chat_format_single(g_chat_templates.get(), chat_msgs, new_user, true, false)
+    const std::string formatted_user_prompt = (has_chat_template || g_native_tool_mode)
+        ? format_with_native_tools(chat_msgs, new_user, true)
         : new_user.content;
     env->ReleaseStringUTFChars(juser_prompt, user_prompt);
 
     // Do not mutate history before the prompt is checked and decoded.
-    auto user_tokens = common_tokenize(g_context, formatted_user_prompt, has_chat_template, has_chat_template);
+    auto user_tokens = common_tokenize(g_context, formatted_user_prompt,
+                                       has_chat_template && !g_native_tool_mode, has_chat_template || g_native_tool_mode);
     for (auto id: user_tokens) {
         LOGv("token: `%s`\t -> `%d`", common_token_to_piece(g_context, id).c_str(), id);
     }
@@ -707,6 +831,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_unload(JNIEnv * /*unused*/, job
     if (g_sampler) common_sampler_free(g_sampler);
     g_sampler = nullptr;
     g_chat_templates.reset();
+    g_native_tool_specs.clear();
+    g_native_tool_mode = false;
     g_batch = common_batch();
     if (g_context) llama_free(g_context);
     g_context = nullptr;
