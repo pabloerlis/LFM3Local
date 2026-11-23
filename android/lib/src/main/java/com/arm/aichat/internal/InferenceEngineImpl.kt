@@ -112,6 +112,12 @@ internal class InferenceEngineImpl private constructor(
     private external fun finalizePendingTurn()
 
     @FastNative
+    private external fun cacheConversationNative(chatId: Long, revision: Long, configKey: String): Boolean
+
+    @FastNative
+    private external fun restoreCachedConversationNative(chatId: Long, revision: Long, configKey: String): Boolean
+
+    @FastNative
     private external fun restoreConversationNative(
         systemPrompt: String, roles: Array<String>, contents: Array<String>
     ): Int
@@ -221,6 +227,34 @@ internal class InferenceEngineImpl private constructor(
                 else "Using compatibility text descriptions for tool schemas")
             configured
         }
+
+    override suspend fun cacheConversation(
+        chatId: Long, revision: Long, configurationKey: String
+    ): Boolean = withContext(llamaDispatcher) {
+        if (_state.value !is InferenceEngine.State.ModelReady) return@withContext false
+        require(chatId > 0 && configurationKey.length == 64) { "Invalid snapshot identity" }
+        try {
+            cacheConversationNative(chatId, revision, configurationKey)
+        } catch (e: Exception) {
+            Log.w(TAG, "Context cache unavailable; cold replay remains supported", e)
+            false
+        }
+    }
+
+    override suspend fun restoreCachedConversation(
+        chatId: Long, revision: Long, configurationKey: String
+    ): Boolean = withContext(llamaDispatcher) {
+        if (_state.value !is InferenceEngine.State.ModelReady) return@withContext false
+        require(chatId > 0 && configurationKey.length == 64) { "Invalid snapshot identity" }
+        try {
+            val hit = restoreCachedConversationNative(chatId, revision, configurationKey)
+            if (hit) _readyForSystemPrompt = false
+            hit
+        } catch (e: Exception) {
+            Log.w(TAG, "Context cache restore failed; falling back to replay", e)
+            false
+        }
+    }
 
     override suspend fun restoreConversation(
         systemPrompt: String, roles: List<String>, contents: List<String>

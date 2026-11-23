@@ -29,6 +29,14 @@ interface InferenceEngine {
      * Returns false for older/incompatible chat templates (compatibility mode). */
     suspend fun configureToolSchemas(tools: List<NativeToolSchema>): Boolean
 
+    /** Save up to two recent chats as bounded RAM KV checkpoints.
+     * Can return false under memory pressure; normal SQLite replay remains available. */
+    suspend fun cacheConversation(chatId: Long, revision: Long, configurationKey: String): Boolean
+
+    /** Fast path for reopening a previous chat, if key and revision match.
+     * Returns false on a miss; caller then restores from the durable SQLite journal. */
+    suspend fun restoreCachedConversation(chatId: Long, revision: Long, configurationKey: String): Boolean
+
     /** Restore previous role-separated turns without reloading the model. */
     suspend fun restoreConversation(systemPrompt: String, roles: List<String>, contents: List<String>)
 
