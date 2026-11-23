@@ -78,4 +78,25 @@ class HarnessCoreTest {
         assertFalse(tools.execute(ToolInvocation("get_current_datetime", mapOf("bad" to "x"))).success)
         assertFalse(tools.execute(ToolInvocation("calculator", mapOf("expression" to "2+2", "extra" to "x"))).success)
     }
+    @Test fun nativePromptDoesNotDuplicateJsonToolSchemas() {
+        val compat = harnessSystemPrompt()
+        val native = harnessSystemPrompt(nativeToolSchemas = true)
+        assertTrue(compat.contains("additionalProperties"))
+        assertFalse(native.contains("additionalProperties"))
+        assertTrue(native.contains("Template") || native.contains("template"))
+        assertTrue(native.length < compat.length)
+    }
+
+    @Test fun nativePromptListsEnabledSkillWithoutEmbeddingJson() {
+        val source = object : NoteSource {
+            override fun allNotes() = listOf(NoteRecord(1, "Oficina", "Revisar multímetro.", 1L))
+        }
+        val skills = SkillCatalog(listOf(NotesSkill(source)))
+        val enabled = harnessSystemPrompt(skills, nativeToolSchemas = true)
+        val disabled = harnessSystemPrompt(SkillCatalog(), nativeToolSchemas = true)
+        assertTrue(enabled.contains("search_local_notes"))
+        assertFalse(disabled.contains("search_local_notes"))
+        assertFalse(enabled.contains("\"properties\""))
+    }
+
 }
