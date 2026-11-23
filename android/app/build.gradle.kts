@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.lfm3local"
         minSdk = 30
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0-reliability"
+        versionCode = 5
+        versionName = "0.5.0-local-skills"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
