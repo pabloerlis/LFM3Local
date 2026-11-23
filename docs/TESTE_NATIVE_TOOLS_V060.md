@@ -46,3 +46,13 @@ A mudança de identificador é deliberada: o cache de assinatura Debug das vers�
 O pipeline roda Kotlin/JUnit, compila o motor C++ e inspeciona as bibliotecas ARM64. Os testes Kotlin verificam os prompts com/sem schemas redundantes, a lista de permissões e o fluxo de ferramentas com um backend simulado.
 
 **Não verificado sem acesso a smartphone/GGUF:** fluidez real, compatibilidade da instância Jinja com seu arquivo específico e se o modelo segue a estrutura correta de tool calls após várias rodadas. A fallback automática não garante que toda divergência de prefixo durante inferência seja recuperável; se houver erro no modo experimental, desligue a opção e registre a mensagem exibida no aplicativo.
+
+### v0.6.1 — resultado do build de teste (23/11/2026)
+
+- [GitHub Actions 45215385181](https://github.com/pabloerlis/LFM3Local/actions/runs/45215385181): **sucesso**.
+- 31 métodos de teste JUnit no projeto; `app:testDebugUnitTest` aprovado.
+- Compilação ARM64 e `app:assembleDebug` aprovadas. Pacote `br.com.lfm3local.nativepreview` conferido pela CI.
+- APK extraído do artefato, integridade ZIP/CRC aprovada; 8 bibliotecas ARM64 presentes.
+- Arquivo APK: **67.922.763 bytes**; SHA-256 `82ecda545b57e0e059588bbfea3ed3d606eeecb7bcbb93790619acee96d7489d`.
+- A chave Debug de teste foi criada e **armazenada no cache do GitHub Actions**, confirmada no log. Cache pode expirar; release permanente exigirá secrets próprios.
+- **Não houve teste com o GGUF real no aparelho** durante este build.

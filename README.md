@@ -84,7 +84,7 @@ experimentais do Preview. Não substitui uma assinatura de release segura e perm
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.1-nativepreview-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45215385181). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.1-nativepreview-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
@@ -151,3 +151,13 @@ Registre a mensagem de status ao ocorrer um erro. Para logs de depuração: `adb
 - Tamanho do APK: **67.768.795 bytes**.
 - SHA-256: `28cc964ff277ba54b3ef981c8e0fdd5f01a145d895b8501418775463a5a86dcf`.
 - **Não** houve execução com o GGUF real em um smartphone na infraestrutura de build.
+
+### v0.6.1 — resultado do build de teste (23/11/2026)
+
+- [GitHub Actions 45215385181](https://github.com/pabloerlis/LFM3Local/actions/runs/45215385181): **sucesso**.
+- 31 métodos de teste JUnit no projeto; `app:testDebugUnitTest` aprovado.
+- Compilação ARM64 e `app:assembleDebug` aprovadas. Pacote `br.com.lfm3local.nativepreview` conferido pela CI.
+- APK extraído do artefato, integridade ZIP/CRC aprovada; 8 bibliotecas ARM64 presentes.
+- Arquivo APK: **67.922.763 bytes**; SHA-256 `82ecda545b57e0e059588bbfea3ed3d606eeecb7bcbb93790619acee96d7489d`.
+- A chave Debug de teste foi criada e **armazenada no cache do GitHub Actions**, confirmada no log. Cache pode expirar; release permanente exigirá secrets próprios.
+- **Não houve teste com o GGUF real no aparelho** durante este build.
