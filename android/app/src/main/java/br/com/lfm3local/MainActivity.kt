@@ -35,6 +35,8 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.NativeToolSchema
 import br.com.lfm3local.harness.LocalToolRegistry
+import br.com.lfm3local.harness.ContextCheckpoint
+import br.com.lfm3local.harness.ContextTurn
 import br.com.lfm3local.harness.HarnessTurnCoordinator
 import br.com.lfm3local.harness.Lfm3Backend
 import br.com.lfm3local.harness.harnessSystemPrompt
@@ -88,6 +90,9 @@ class MainActivity : ComponentActivity() {
     private val nativeToolMode = mutableStateOf(false)
     private val nativeToolsPreferred = mutableStateOf(true)
     private val toolTemplateStatus = mutableStateOf("Aguardando modelo")
+    private val contextRestoreInfo = mutableStateOf("")
+    private var activeContextKey: String? = null
+    private var systemOnlyReady = false
     private val modelReady = mutableStateOf(false)
     private val modelBusy = mutableStateOf(true)
     private val contextBusy = mutableStateOf(false)
@@ -237,6 +242,10 @@ class MainActivity : ComponentActivity() {
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("Ferramentas: " + toolTemplateStatus.value, color = deepGreen,
                             fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (contextRestoreInfo.value.isNotBlank()) {
+                            Text(contextRestoreInfo.value, color = deepGreen, fontSize = 10.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                         if (modelReady.value && !responding.value && !modelBusy.value) {
                 Text("Ferramentas: " + toolTemplateStatus.value,
                     Modifier.fillMaxWidth().background(Color(0xFFE9F5F1))
@@ -415,6 +424,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+            if (contextRestoreInfo.value.isNotBlank()) {
+                Text(contextRestoreInfo.value,
+                    Modifier.fillMaxWidth().background(Color(0xFFF2F6F4))
+                        .padding(horizontal = 12.dp, vertical = 3.dp),
+                    color = deepGreen, fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (lastTurnTelemetry.value.isNotBlank()) {
                 Text(lastTurnTelemetry.value,
@@ -633,6 +649,9 @@ class MainActivity : ComponentActivity() {
         nativeToolsPreferred.value = enabled
         getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_NATIVE_TOOLS, enabled).apply()
         nativeChatId = null
+        activeContextKey = null
+        systemOnlyReady = false
+        contextRestoreInfo.value = ""
         toolTemplateStatus.value = "Reconfiguração pendente"
     }
 
@@ -643,6 +662,9 @@ class MainActivity : ComponentActivity() {
         nativeToolMode.value = false
         toolTemplateStatus.value = "Reconfiguração pendente"
         nativeChatId = null
+        activeContextKey = null
+        systemOnlyReady = false
+        contextRestoreInfo.value = ""
         notesError.value = ""
     }
 
@@ -712,31 +734,78 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun replayMessages(all: List<LocalMessage>): List<LocalMessage> =
+        all.filter {
+            (it.status == "complete" ||
+                (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
+                it.body.isNotBlank()
+        }
+
+    private fun replayRevision(messages: List<LocalMessage>): Long =
+        ContextCheckpoint.revision(messages.map { ContextTurn(it.id, it.role, it.body) })
+
     private suspend fun restoreContext(chatId: Long, history: List<LocalMessage>? = null) {
         if (!modelReady.value || responding.value) return
-        if (nativeChatId == chatId) return
+        if (nativeChatId == chatId) {
+            contextRestoreInfo.value = "Contexto ativo: reutilizado sem reconstrução"
+            return
+        }
         contextBusy.value = true
-        engineStatus.value = "Restaurando contexto desta conversa…"
+        val started = SystemClock.elapsedRealtime()
+        engineStatus.value = "Preparando contexto da conversa…"
         try {
             val all = history ?: withContext(Dispatchers.IO) { store.messages(chatId) }
-            val replay = all.filter {
-                (it.status == "complete" ||
-                    (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
-                    it.body.isNotBlank()
+            val replay = replayMessages(all)
+
+            // First preserve the previous completed turn before changing tools
+            // or overwriting the native KV. The snapshot is optional and bounded.
+            val previous = nativeChatId
+            val previousKey = activeContextKey
+            if (previous != null && previous != chatId && previousKey != null) {
+                val prevMessages = withContext(Dispatchers.IO) {
+                    replayMessages(store.messages(previous))
+                }
+                val revision = replayRevision(prevMessages)
+                val saved = engine.cacheConversation(previous, revision, previousKey)
+                Log.i(TAG, "KV cache store chat=$previous success=$saved")
             }
+
             syncToolSchemas()
-            engine.restoreConversation(
-                harnessSystemPrompt(activeSkills(), nativeToolMode.value),
-                replay.map { it.role }, replay.map { it.body }
-            )
+            val prompt = harnessSystemPrompt(activeSkills(), nativeToolMode.value)
+            val key = ContextCheckpoint.configurationKey(prompt, nativeToolMode.value)
+            val revision = replayRevision(replay)
+            engineStatus.value = "Recuperando contexto…"
+            val strategy = when {
+                // A new empty chat can reuse an already-prefilled system
+                // context if no user interaction occurred since model load.
+                replay.isEmpty() && systemOnlyReady && previous == null &&
+                    activeContextKey == key -> "sistema reutilizado"
+                engine.restoreCachedConversation(chatId, revision, key) -> "cache KV (RAM)"
+                else -> {
+                    engineStatus.value = "Reprocessando histórico recente…"
+                    engine.restoreConversation(
+                        prompt, replay.map { it.role }, replay.map { it.body }
+                    )
+                    "histórico SQLite"
+                }
+            }
             if (selectedId.value == chatId) {
                 nativeChatId = chatId
-                engineStatus.value = "Modelo pronto • contexto restaurado"
+                activeContextKey = key
+                systemOnlyReady = false
+                val duration = SystemClock.elapsedRealtime() - started
+                contextRestoreInfo.value = "Contexto: $strategy • ${duration} ms"
+                engineStatus.value = "Modelo pronto • contexto recuperado"
+                Log.i(TAG, "Context restoration chat=$chatId strategy=$strategy ms=$duration")
             } else {
                 nativeChatId = null
+                activeContextKey = null
+                systemOnlyReady = false
             }
         } catch (e: Exception) {
             nativeChatId = null
+            activeContextKey = null
+            systemOnlyReady = false
             modelReady.value = false
             Log.e(TAG, "Failed to restore conversation", e)
             engineStatus.value = "Falha ao restaurar contexto: " + (e.message ?: "desconhecida")
@@ -1010,6 +1079,9 @@ class MainActivity : ComponentActivity() {
         modelBusy.value = true
         modelReady.value = false
         nativeChatId = null
+        activeContextKey = null
+        systemOnlyReady = false
+        contextRestoreInfo.value = ""
         engineStatus.value = "Carregando pesos do modelo…"
         try {
             withContext(Dispatchers.IO) {
@@ -1022,7 +1094,15 @@ class MainActivity : ComponentActivity() {
             engineStatus.value = "Inicializando conversa…"
             withContext(Dispatchers.IO) {
                 syncToolSchemas()
-                engine.setSystemPrompt(harnessSystemPrompt(activeSkills(), nativeToolMode.value))
+                // No duplicate system-prefill when restoring an existing chat.
+                if (selectedId.value == null) {
+                    val system = harnessSystemPrompt(activeSkills(), nativeToolMode.value)
+                    engine.setSystemPrompt(system)
+                    activeContextKey = ContextCheckpoint.configurationKey(
+                        system, nativeToolMode.value
+                    )
+                    systemOnlyReady = true
+                }
             }
             modelReady.value = true
             engineStatus.value = "Modelo pronto • offline"
