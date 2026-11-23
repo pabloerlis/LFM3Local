@@ -1,49 +1,55 @@
-# LFM3Local — Android MVP
+# LFM3Local — Android MVP 0.2.0
 
-Assistente de IA **offline**, Android ARM64, dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com interface de chat, geração em streaming e cancelamento.
+Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com interface de mensagens inspirada em aplicativos de conversação, histórico local e inferência via `llama.cpp`.
 
-## Download do APK
+## Instalar o APK
 
-**Build Debug v0.1.0**, compilado com sucesso em 23/11/2026:
-- [Execução aprovada do GitHub Actions e artefato APK](https://github.com/pabloerlis/LFM3Local/actions/runs/45190108294)
-- Na execução, abra **Artifacts** → **LFM3Local-MVP-debug-APK**. Baixe o ZIP e extraia `app-debug.apk`.
-- APK: Android **11+ (API 30)**, arquitetura **ARM64 (arm64-v8a)**, ~67,4 MB.
-- O build automatizado confirma a presença de `libai-chat.so` e das bibliotecas `libllama.so` / `libggml.so`. **Não houve teste de inferência com pesos reais em dispositivo físico; é um MVP experimental.**
+- Android **11 ou mais recente** (API 30+), processador ARM64.
+- [Builds e artefatos de APK no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-MVP-debug-APK** e extraia `app-debug.apk`.
+- O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
+- Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
-## Instalação e primeiros passos
+> **Importante para quem instalou o antigo APK Debug 0.1.0:** builds feitos em runners diferentes do GitHub podem ser assinados com chaves de depuração diferentes. Se a atualização falhar por incompatibilidade de assinatura, será necessário desinstalar o APK anterior antes de instalar este. **Desinstalar ou limpar dados remove o arquivo GGUF importado e o histórico local.** Guarde uma cópia do GGUF original fora do aplicativo. O v0.1.0 não armazenava conversas em banco, portanto não há histórico anterior a migrar.
 
-1. Instale o APK no smartphone Android ARM64.
-2. Baixe o modelo oficial [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB).
-3. Ao abrir o app, escolha **Importar arquivo GGUF** e selecione o modelo.
-4. O arquivo será copiado para armazenamento privado do aplicativo, portanto reserve espaço livre suficiente.
-5. Após `Modelo pronto`, converse normalmente. Use **Parar** para interromper a resposta e **Novo chat** para reiniciar o contexto.
-6. Em aberturas posteriores, o app tenta carregar automaticamente o arquivo importado.
+## O que há no MVP 0.2.0
 
-**Limitações da versão 0.1.0:** apenas texto; contexto de 4096 tokens; saída limitada inicialmente a 512 tokens por turno; sem skills, ferramentas, histórico persistente nem download interno de pesos. As mensagens anteriores permanecem no contexto enquanto a sessão estiver aberta e couberem no limite. O aparelho deve ter memória suficiente para carregar o modelo; desempenho e estabilidade ainda precisam de validação física.
+- **Tela de conversas**, com título, trecho da última mensagem, horário, busca por título/trecho e botão para criar conversa.
+- **Chat estilo mensageiro**, com bolhas distintas para usuário e LFM3, horário e campo de digitação fixo.
+- **Histórico de conversas local**, gravado em SQLite no armazenamento privado do Android; continua disponível ao fechar e abrir o aplicativo.
+- **Múltiplas conversas** independentes, renomeação e exclusão com confirmação.
+- **Nome automático** do chat a partir da primeira mensagem, editável.
+- **Reconstrução do contexto** pelo template LFM3 ao reabrir uma conversa: mensagens anteriores são reenviadas para o contexto do motor, respeitando a janela de 4.096 tokens. Mensagens mais antigas podem sair do contexto de inferência, mas continuam visíveis no histórico salvo.
+- **Streaming de tokens**, cancelamento da geração e recuperação de respostas incompletas depois de encerramento inesperado.
+- Uso offline; sem sincronização e sem permissões de internet necessárias ao chat.
 
-## Código-fonte e build
+### Limitações conhecidas
+
+- Sem teste de inferência com o GGUF real em aparelho físico até o momento: a compilação não comprova velocidade ou qualidade de geração.
+- Um texto longo pode exceder o contexto máximo de 4.096 tokens; o motor mantém os turnos recentes ao restaurar uma conversa. O histórico no banco não tem esse limite.
+- Resposta padrão limitada a até 512 tokens por turno. Sem anexos, voz, skills ou ferramentas nesta versão.
+- O histórico está armazenado **somente no aparelho**. Não existe backup, exportação, sincronização ou recuperação após apagar os dados do aplicativo.
+- Na mudança de conversa, o modelo precisa reconstruir o contexto local e isso pode causar uma pausa. Não há instâncias simultâneas do modelo.
+
+## Arquitetura resumida
+
+- `android/app/` — Kotlin, Jetpack Compose, interface e persistência SQLite (`ChatStore`).
+- `android/lib/` — biblioteca JNI e motor nativo.
+- `scripts/bootstrap-llama.sh` — checkout fixo de `llama.cpp` no commit `4663f9ca8a97c525ba3d248711fa2b52050920ec`.
+- `.github/workflows/android-apk.yml` — build Android automatizado.
+
+Para compilar localmente, com SDK/NDK configurados:
 
 ```bash
 bash scripts/bootstrap-llama.sh
 gradle -p android :app:assembleDebug
 ```
 
-O script fixa o `llama.cpp` no commit `4663f9ca8a97c525ba3d248711fa2b52050920ec`. A compilação automatizada está em [android-apk.yml](.github/workflows/android-apk.yml). Versões de Android SDK, NDK e Gradle estão definidas no projeto e no workflow.
+Consulte [planejamento técnico](docs/PLANEJAMENTO.md) e [plataforma de skills futura](docs/SKILLS.md). A recomendação de hinos permanece uma skill futura, não uma regra codificada no motor principal.
 
-## Arquitetura
+## Licenças
 
-- Kotlin / Jetpack Compose: interface e gerenciamento do GGUF.
-- JNI / C++ / llama.cpp: inferência local com template de conversa do modelo.
-- Posteriormente: harness extensível por **skills**, incluindo uma futura skill de recomendação de hinos, sem incorporar o domínio de hinos ao núcleo.
+O runtime e o exemplo de integração foram adaptados do [llama.cpp](https://github.com/ggml-org/llama.cpp) sob [licença MIT](third_party/llama.cpp-LICENSE). O modelo GGUF tem licença independente fornecida pela Liquid AI.
 
-Leia [Planejamento](docs/PLANEJAMENTO.md) e [Skills](docs/SKILLS.md).
+## Diagnóstico
 
-## Licenças e proveniência
-
-O motor e a integração JNI foram adaptados do [exemplo Android de llama.cpp](https://github.com/ggml-org/llama.cpp/tree/4663f9ca8a97c525ba3d248711fa2b52050920ec/examples/llama.android), distribuído conforme [licença MIT](third_party/llama.cpp-LICENSE).
-
-Os pesos do modelo não estão incluídos no APK; a licença da Liquid AI é independente e deve ser consultada no repositório do modelo.
-
-## Feedback do MVP
-
-Para investigar travamentos: anote o estado exibido, envie a mensagem usada, informe se a falha ocorreu ao carregar ou gerar e exporte o **Logcat** pelo Android Studio (`adb logcat -s LFM3Local llama.cpp ai-chat`) quando disponível.
+Registre a mensagem de status ao ocorrer um erro. Para logs de depuração: `adb logcat -s LFM3Local llama.cpp ai-chat`. Inclua versão do aparelho, variante do GGUF e sequência que reproduz a falha.
