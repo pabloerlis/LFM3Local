@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.lfm3local"
         minSdk = 30
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-chat-history"
+        versionCode = 3
+        versionName = "0.3.0-harness"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
@@ -42,4 +42,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    testImplementation("junit:junit:4.13.2")
 }

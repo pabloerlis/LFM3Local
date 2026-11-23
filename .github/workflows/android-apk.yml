@@ -41,6 +41,8 @@ jobs:
           gradle-version: '8.14.3'
       - name: Checkout pinned llama.cpp
         run: bash scripts/bootstrap-llama.sh
+      - name: Harness and local logic unit tests
+        run: gradle -p android :app:testDebugUnitTest --no-daemon --stacktrace --max-workers=2
       - name: Build Debug APK
         run: |
           for attempt in 1 2 3; do
@@ -55,7 +57,7 @@ jobs:
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libai-chat.so'
       - uses: actions/upload-artifact@v4
         with:
-          name: LFM3Local-MVP-debug-APK
+          name: LFM3Local-Harness-v0.3.0-debug-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30

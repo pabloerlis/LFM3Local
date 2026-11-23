@@ -479,7 +479,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_processToolResponse(
     try {
         const std::string formatted = common_chat_format_single(
             g_chat_templates.get(), chat_msgs, tool, true, false);
-        const auto tokens = common_tokenize(g_context, formatted, false, false);
+        const bool has_template = common_chat_templates_was_explicit(g_chat_templates.get());
+        const auto tokens = common_tokenize(g_context, formatted, has_template, has_template);
         if (tokens.empty() || tokens.size() > 256) return 4;
         if ((size_t) current_position + tokens.size() + 12 >= DEFAULT_CONTEXT_SIZE) return 5;
         reset_short_term_states();
