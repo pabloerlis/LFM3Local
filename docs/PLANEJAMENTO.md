@@ -54,6 +54,7 @@ Android App (Kotlin + Jetpack Compose)
 │   ├── LFM3PromptFormatter + tokenizer/template upstream
 │   ├── ContextBudgetManager
 │   ├── HarnessOrchestrator
+│   ├── SkillRegistry / SkillRouter / SkillPermissionPolicy
 │   │   ├── ToolRegistry (schema, permissões, validator)
 │   │   ├── ToolCallParser (XML robusto, streaming)
 │   │   ├── ToolExecutor (resultado estruturado + timeout)
@@ -68,6 +69,19 @@ Android App (Kotlin + Jetpack Compose)
 ```
 
 **Regra de separação:** o motor gera tokens; o harness interpreta, escolhe ferramentas, valida e coordena; a UI apresenta estados. Não colocar regras de negócio no JNI nem fazer o modelo simular a execução de ferramenta por texto.
+
+## 4.1. Plataforma de skills como arquitetura de produto
+
+**Decisão:** o LFM3Local será um assistente de IA offline e modular, inspirado nas funções de chat, memória, agentes e mini-apps do Layla, **sem roleplay ou personagens**. O harness é genérico; as funcionalidades especializadas entram como **skills isoladas, opcionais, versionadas e com permissões**.
+
+- O núcleo do modelo, as ferramentas e os mecanismos de segurança não contêm regras específicas de hinos ou outros domínios.
+- `SkillManifest`, `SkillRegistry`, `SkillRouter` e `SkillPermissionPolicy` deverão ser introduzidos em P2, sem atrasar o primeiro APK de P1.
+- O registro e a ativação de skills deverão suportar instruções, ferramentas e fontes locais somente para a skill ativa.
+- A recomendação contextual de hinos é uma **skill futura P6**, com acervo local, busca, pertinência semântica, evidências e refinamento conversacional; não é o escopo principal do APK.
+- O uso de skills não dependerá de personagens. Perfis são configurações operacionais, não personalidades fictícias.
+- Não habilitar execução de código de terceiros em pacotes de skills no MVP.
+
+Especificação: [Plataforma de skills e skill de hinos](SKILLS.md).
 
 ## 5. Harness dedicado ao LFM3
 
@@ -112,11 +126,11 @@ Android App (Kotlin + Jetpack Compose)
 
 ## 7. Design de UX
 
-Quatro abas principais, com visual limpo:
+Quatro abas principais, com visual limpo e profissional, sem personagens ou roleplay:
 1. **Chat** — bolhas, streaming, cancelar, anexar nota local futuramente; campo de digitação fixo.
-2. **Atividade** — trilha verificável do turno e chamadas de ferramenta; execução real vs proposta do modelo.
-3. **Modelo** — status, arquivo, importação, download, memória necessária estimada, configuração.
-4. **Diagnóstico** — versão do motor, CPU/ABI, contexto, logs, TTFT, tokens/s e RAM.
+2. **Skills** — catálogo ativável, permissões, dados locais, configuração e estado.
+3. **Atividade** — trilha verificável do turno e chamadas de ferramenta; execução real vs proposta do modelo.
+4. **Configurações/Diagnóstico** — modelo, importação, métricas, logs, CPU/ABI, contexto, TTFT, tokens/s e RAM.
 
 Não mostrar ações fictícias nem pedir novamente configurações concluídas.
 
@@ -132,6 +146,8 @@ Não mostrar ações fictícias nem pedir novamente configurações concluídas.
 | P5: Release | Agente QA/CI | Testes unitários/instrumentados, matriz de dispositivos, build GitHub Actions | APK Debug anexado ao CI e APK Release assinado quando houver chave segura |
 
 **Revisor independente** cruza entregáveis de cada fase com os critérios, casos de falha e logs. Estes são papéis de trabalho planejados, não agentes autônomos já executados.
+
+**P6: Skill de hinos (futuro)** — responsável funcional: Agente de Domínio/RAG; somente após a plataforma de skills estar estável; avaliação por relevância contextual, não apenas palavras-chave.
 
 ### Marco obrigatório: primeiro APK
 O **primeiro APK** é liberado já em **P1**, antes da implementação integral do harness. Ele deve carregar o Q4_K_M e produzir respostas locais, com fallback de erro e logs.
