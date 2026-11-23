@@ -1,0 +1,45 @@
+name: Build Android MVP APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'scripts/**'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK toolchains
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456' 'cmake;3.22.1'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+      - name: Checkout pinned llama.cpp
+        run: bash scripts/bootstrap-llama.sh
+      - name: Build Debug APK
+        run: gradle -p android :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify arm64 library packaged
+        run: |
+          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libai-chat.so'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LFM3Local-MVP-debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
