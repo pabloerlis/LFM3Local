@@ -101,6 +101,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
 
     @FastNative
+    private external fun processToolResponse(toolName: String, response: String, predictLength: Int): Int
+
+    @FastNative
     private external fun generateNextToken(): String?
 
     @FastNative
@@ -284,6 +287,35 @@ internal class InferenceEngineImpl private constructor(
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error during generation!", e)
+            _state.value = InferenceEngine.State.Error(e)
+            throw e
+        }
+    }.flowOn(llamaDispatcher)
+
+    override fun sendToolResult(
+        toolName: String, result: String, predictLength: Int
+    ): Flow<String> = flow {
+        require(toolName.matches(Regex("[a-z][a-z0-9_]{0,63}")))
+        require(result.length <= 1024)
+        check(_state.value is InferenceEngine.State.ModelReady) {
+            "Tool continuation requires the ready engine"
+        }
+        try {
+            _state.value = InferenceEngine.State.ProcessingUserPrompt
+            val code = processToolResponse(toolName, result, predictLength)
+            if (code != 0) throw IOException("Tool continuation rejected by native runtime: " + code)
+            _state.value = InferenceEngine.State.Generating
+            while (!_cancelGeneration) {
+                val part = generateNextToken() ?: break
+                if (part.isNotEmpty()) emit(part)
+            }
+            finalizePendingTurn()
+            _state.value = InferenceEngine.State.ModelReady
+        } catch (e: CancellationException) {
+            withContext(kotlinx.coroutines.NonCancellable) { finalizePendingTurn() }
+            _state.value = InferenceEngine.State.ModelReady
+            throw e
+        } catch (e: Exception) {
             _state.value = InferenceEngine.State.Error(e)
             throw e
         }

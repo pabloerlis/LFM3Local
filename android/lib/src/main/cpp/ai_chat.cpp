@@ -453,6 +453,48 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_restoreConversationNative(
     }
 }
 
+
+// A tool result is a real "tool" role in the LFM3 conversation, not a fake
+// user instruction. Tool execution happens in the Android host, never in JNI.
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_processToolResponse(
+        JNIEnv * env, jobject, jstring jname, jstring jresult, jint n_predict) {
+    if (!g_model || !g_context || !g_sampler || chat_msgs.empty() ||
+            chat_msgs.back().role != ROLE_ASSISTANT) return 1;
+    if (n_predict <= 0 || n_predict > 2048) return 2;
+    const char * cname = env->GetStringUTFChars(jname, nullptr);
+    const char * cresult = env->GetStringUTFChars(jresult, nullptr);
+    const std::string name(cname);
+    const std::string result(cresult);
+    env->ReleaseStringUTFChars(jname, cname);
+    env->ReleaseStringUTFChars(jresult, cresult);
+    if (name.size() > 64 || result.size() > 1024) return 3;
+
+    common_chat_msg tool;
+    tool.role = "tool";
+    tool.tool_name = name;
+    tool.content = result;
+
+    try {
+        const std::string formatted = common_chat_format_single(
+            g_chat_templates.get(), chat_msgs, tool, true, false);
+        const auto tokens = common_tokenize(g_context, formatted, false, false);
+        if (tokens.empty() || tokens.size() > 256) return 4;
+        if ((size_t) current_position + tokens.size() + 12 >= DEFAULT_CONTEXT_SIZE) return 5;
+        reset_short_term_states();
+        if (decode_tokens_in_batches(g_context, g_batch, tokens, current_position, true)) return 6;
+        chat_msgs.push_back(tool);
+        current_position += (llama_pos) tokens.size();
+        stop_generation_position = current_position + n_predict;
+        LOGi("Tool result appended from %s, %d tokens", name.c_str(), (int) tokens.size());
+        return 0;
+    } catch (const std::exception & e) {
+        LOGe("Failed to append tool result: %s", e.what());
+        return 7;
+    }
+}
+
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(

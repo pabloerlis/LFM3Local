@@ -33,6 +33,9 @@ interface InferenceEngine {
      */
     fun sendUserPrompt(message: String, predictLength: Int = DEFAULT_PREDICT_LENGTH): Flow<String>
 
+    /** Continue a completed assistant tool call with a real tool-role message. */
+    fun sendToolResult(toolName: String, result: String, predictLength: Int = 512): Flow<String>
+
     /**
      * Runs a benchmark with the specified parameters.
      */
