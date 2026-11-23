@@ -59,6 +59,16 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
         throw IllegalStateException("Unimplemented database migration $oldVersion -> $newVersion")
     }
 
+    /** A process may die during token streaming; mark such turns as interrupted. */
+    fun recoverPendingMessages() {
+        writableDatabase.execSQL("""
+            UPDATE messages
+            SET status='interrupted',
+                body=CASE WHEN TRIM(body)='' THEN 'Resposta interrompida.' ELSE body END
+            WHERE status='draft'
+        """.trimIndent())
+    }
+
     fun conversations(): List<LocalConversation> {
         val result = mutableListOf<LocalConversation>()
         readableDatabase.query(

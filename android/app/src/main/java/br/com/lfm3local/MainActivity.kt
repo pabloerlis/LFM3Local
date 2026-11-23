@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
         store = ChatStore(applicationContext)
         setContent { App() }
         lifecycleScope.launch {
+            withContext(Dispatchers.IO) { store.recoverPendingMessages() }
             refreshConversations()
             try {
                 engine = withContext(Dispatchers.IO) {
