@@ -525,8 +525,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_configureToolsNative(
             candidates.push_back(std::move(tool));
         }
         g_native_tool_specs = std::move(candidates);
-        g_template_timestamp = std::chrono::system_clock::now();
-
+        // Keep the template clock stable for the model lifetime. Reconfiguring
+        // tools on chat switches must not change the prefix already in the KV.
         common_chat_msg system;
         system.role = "system";
         system.content = "You are an offline assistant.";
