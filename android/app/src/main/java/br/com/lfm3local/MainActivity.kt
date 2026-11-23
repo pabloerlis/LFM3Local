@@ -496,7 +496,8 @@ class MainActivity : ComponentActivity() {
         try {
             val all = history ?: withContext(Dispatchers.IO) { store.messages(chatId) }
             val replay = all.filter {
-                (it.status == "complete" || it.status == "interrupted") &&
+                (it.status == "complete" ||
+                    (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
                     it.body.isNotBlank()
             }
             engine.restoreConversation(SYSTEM_PROMPT, replay.map { it.role }, replay.map { it.body })
@@ -563,6 +564,9 @@ class MainActivity : ComponentActivity() {
 
         draft.value = ""
         responding.value = true
+        val autoTitle = if (selectedTitle.value == "Nova conversa") {
+            content.lineSequence().first().trim().take(46).ifBlank { "Nova conversa" }
+        } else null
         engineStatus.value = "Preparando resposta…"
         generation = lifecycleScope.launch {
             var assistantId: Long? = null
@@ -573,8 +577,10 @@ class MainActivity : ComponentActivity() {
                 val result = withContext(Dispatchers.IO) {
                     val userId = store.append(id, "user", content)
                     val replyId = store.append(id, "assistant", "", "draft")
+                    if (autoTitle != null) store.rename(id, autoTitle)
                     Pair(userId, replyId)
                 }
+                if (autoTitle != null) selectedTitle.value = autoTitle
                 assistantId = result.second
                 entries.add(LocalMessage(result.first, id, "user", content, "complete", System.currentTimeMillis()))
                 entries.add(LocalMessage(result.second, id, "assistant", "", "draft", System.currentTimeMillis()))
