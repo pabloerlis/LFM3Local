@@ -7,6 +7,7 @@ Aplicativo Android nativo de inferência **offline** e **harness especializado n
 **Fase de planejamento (23/11/2026).** O projeto Android, o motor nativo e o APK ainda não foram implementados.
 
 - [Planejamento técnico, arquitetura, fases e critérios de aceite](docs/PLANEJAMENTO.md)
+- [Skills modulares, benchmark Layla sem roleplay e futura skill de hinos](docs/SKILLS.md)
 - [Checkpoint oficial Q4_K_M GGUF](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF)
 - [Documentação oficial do LFM3](https://huggingface.co/LiquidAI/LFM3-1.7B)
 - [llama.cpp para Android](https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md)
