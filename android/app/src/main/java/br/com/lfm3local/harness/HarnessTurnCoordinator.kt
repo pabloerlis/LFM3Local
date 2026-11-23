@@ -111,7 +111,10 @@ class HarnessTurnCoordinator(
 }
 
 /** Tool names and JSON schemas travel to the LFM3 system context. */
-fun harnessSystemPrompt(skills: SkillCatalog = SkillCatalog()): String {
+fun harnessSystemPrompt(
+    skills: SkillCatalog = SkillCatalog(),
+    nativeToolSchemas: Boolean = false
+): String {
     val tools = LocalToolRegistry()
     return buildString {
         append(
@@ -125,16 +128,26 @@ fun harnessSystemPrompt(skills: SkillCatalog = SkillCatalog()): String {
             "Para cálculos aritméticos que exijam exatidão, utilize calculator. " +
             "Para saber a data ou hora ATUAL do aparelho, utilize get_current_datetime. " +
             "Não afirme ter executado uma ferramenta sem receber sua resposta. " +
-            "Quando precisar de uma ferramenta, escreva exatamente UM bloco XML no formato " +
-            "<tool_call><function=calculator><parameter=expression>2+2</parameter></function></tool_call> " +
-            "ou <tool_call><function=get_current_datetime></function></tool_call>. " +
-            "Não imprima XML em respostas finais, e após receber o resultado da ferramenta " +
-            "responda ao usuário com o valor real obtido. " +
-            "Ferramentas disponíveis (JSON Schema para parâmetros): "
+            "Quando precisar de uma ferramenta, emita uma chamada e aguarde o retorno do aplicativo. " +
+            "Não imprima XML em respostas finais; depois do resultado responda naturalmente. "
         )
-        for (tool in tools.definitions + skills.definitions()) {
-            append(tool.name).append(": ").append(tool.description)
-                .append(" parametros=").append(tool.schema).append("; ")
+        if (nativeToolSchemas) {
+            append(
+                "As ferramentas autorizadas e seus JSON Schemas estão no chat template nativo " +
+                "desta requisição. Gere chamadas usando o formato de tool_call previsto no template; " +
+                "não invente funções ou argumentos. "
+            )
+        } else {
+            append(
+                "Formato de compatibilidade: <tool_call><function=calculator>" +
+                "<parameter=expression>2+2</parameter></function></tool_call> ou " +
+                "<tool_call><function=get_current_datetime></function></tool_call>. " +
+                "Ferramentas disponíveis (JSON Schema para parâmetros): "
+            )
+            for (tool in tools.definitions + skills.definitions()) {
+                append(tool.name).append(": ").append(tool.description)
+                    .append(" parametros=").append(tool.schema).append("; ")
+            }
         }
         if (skills.definitions().any { it.name == "search_local_notes" }) {
             append(
