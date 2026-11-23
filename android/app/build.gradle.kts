@@ -16,6 +16,7 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
+        debug { applicationIdSuffix = ".preview" }
         release { isMinifyEnabled = false }
     }
     buildFeatures { compose = true }

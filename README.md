@@ -43,10 +43,24 @@ O modelo pode chamar ferramentas locais usando o formato XML do LFM3: `<tool_cal
 
 **Observação:** o comportamento de chamadas emitidas pelo GGUF ainda exige validação num smartphone; o conjunto de ferramentas é apresentado ao modelo no prompt de sistema nesta versão. Não há download de rede, execução de scripts, manipulação de arquivos, skills de terceiros ou acesso ao sistema operacional.
 
+## Instalação de teste sem apagar a versão anterior
+
+A versão 0.5.0 é distribuída como **LFM3Local Skills Beta** com identificador Android
+`br.com.lfm3local.preview`. Ela pode ser instalada **ao lado do LFM3Local antigo**
+(`br.com.lfm3local`), sem exigir desinstalação.
+
+**Atenção:** o Preview possui armazenamento próprio. Suas conversas, notas e GGUF **não**
+são importados automaticamente do app antigo. Para testar o modelo, importe o GGUF novamente
+no Preview e reserve espaço de armazenamento para a cópia. O histórico do aplicativo
+antigo permanece intacto.
+
+O pipeline utiliza cache de chave de assinatura **Debug**, exclusivamente para builds
+experimentais do Preview. Não substitui uma assinatura de release segura e permanente.
+
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.5.0-debug-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.5.0-preview-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
