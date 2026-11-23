@@ -368,6 +368,91 @@ static int decode_tokens_in_batches(
     return 0;
 }
 
+
+// Rebuilds a named conversation in the current model without reloading the GGUF.
+// The chat template supplied by the model defines role boundaries; no string
+// concatenation of user-controlled text is used as a substitute for role messages.
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_restoreConversationNative(
+        JNIEnv *env, jobject, jstring jsystem, jobjectArray jroles, jobjectArray jcontents) {
+    if (!g_model || !g_context || !g_chat_templates || !g_sampler) return 1;
+    const jsize count = env->GetArrayLength(jroles);
+    if (count != env->GetArrayLength(jcontents) || count > 500) return 2;
+    std::vector<common_chat_msg> saved;
+    common_chat_msg sys;
+    sys.role = ROLE_SYSTEM;
+    const char *system_text = env->GetStringUTFChars(jsystem, nullptr);
+    sys.content = system_text;
+    env->ReleaseStringUTFChars(jsystem, system_text);
+    saved.push_back(sys);
+
+    for (jsize n = 0; n < count; ++n) {
+        auto role_ref = static_cast<jstring>(env->GetObjectArrayElement(jroles, n));
+        auto body_ref = static_cast<jstring>(env->GetObjectArrayElement(jcontents, n));
+        if (!role_ref || !body_ref) return 3;
+        const char *role = env->GetStringUTFChars(role_ref, nullptr);
+        const char *body = env->GetStringUTFChars(body_ref, nullptr);
+        common_chat_msg msg;
+        msg.role = role;
+        msg.content = body;
+        env->ReleaseStringUTFChars(role_ref, role);
+        env->ReleaseStringUTFChars(body_ref, body);
+        env->DeleteLocalRef(role_ref);
+        env->DeleteLocalRef(body_ref);
+        if (msg.role != ROLE_USER && msg.role != ROLE_ASSISTANT) return 4;
+        saved.push_back(std::move(msg));
+    }
+
+    try {
+        // Keep the latest message pairs inside the 4K context. Reserve at
+        // least 768 tokens for the next user prompt and generated answer.
+        size_t first = 1;
+        llama_tokens tokens;
+        std::vector<common_chat_msg> selected;
+        while (true) {
+            selected.clear();
+            selected.push_back(saved.front());
+            selected.insert(selected.end(), saved.begin() + first, saved.end());
+            std::vector<common_chat_msg> prefix;
+            std::string rendered;
+            for (const auto &msg : selected) {
+                rendered += common_chat_format_single(
+                    g_chat_templates.get(), prefix, msg, false, false);
+                prefix.push_back(msg);
+            }
+            tokens = common_tokenize(g_context, rendered, true, true);
+            if (tokens.size() <= DEFAULT_CONTEXT_SIZE - 768) break;
+            if (first >= saved.size()) return 5;
+            ++first;
+            // Drop the matching assistant as well when possible.
+            if (first < saved.size() && saved[first].role == ROLE_ASSISTANT) ++first;
+        }
+
+        reset_long_term_states();
+        reset_short_term_states();
+        common_sampler_reset(g_sampler);
+
+        const std::string sys_formatted =
+            common_chat_format_single(g_chat_templates.get(), {}, selected.front(), false, false);
+        system_prompt_position = (llama_pos) common_tokenize(
+            g_context, sys_formatted, true, true).size();
+        if (decode_tokens_in_batches(g_context, g_batch, tokens, 0, true)) {
+            reset_long_term_states();
+            return 6;
+        }
+        chat_msgs = std::move(selected);
+        current_position = (llama_pos) tokens.size();
+        LOGi("Restored conversation: %d of %d messages, %d tokens",
+             (int) chat_msgs.size() - 1, (int) saved.size() - 1, (int) current_position);
+        return 0;
+    } catch (const std::exception & e) {
+        LOGe("History restoration failed: %s", e.what());
+        reset_long_term_states();
+        return 7;
+    }
+}
+
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_processSystemPrompt(

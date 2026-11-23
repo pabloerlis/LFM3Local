@@ -25,6 +25,9 @@ interface InferenceEngine {
      */
     suspend fun setSystemPrompt(systemPrompt: String)
 
+    /** Restore previous role-separated turns without reloading the model. */
+    suspend fun restoreConversation(systemPrompt: String, roles: List<String>, contents: List<String>)
+
     /**
      * Sends a user prompt to the loaded model and returns a Flow of generated tokens.
      */

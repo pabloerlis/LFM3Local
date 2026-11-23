@@ -107,6 +107,11 @@ internal class InferenceEngineImpl private constructor(
     private external fun finalizePendingTurn()
 
     @FastNative
+    private external fun restoreConversationNative(
+        systemPrompt: String, roles: Array<String>, contents: Array<String>
+    ): Int
+
+    @FastNative
     private external fun unload()
 
     @FastNative
@@ -185,6 +190,26 @@ internal class InferenceEngineImpl private constructor(
                 throw e
             }
         }
+
+    override suspend fun restoreConversation(
+        systemPrompt: String, roles: List<String>, contents: List<String>
+    ) = withContext(llamaDispatcher) {
+        require(roles.size == contents.size) { "Role/content count mismatch" }
+        require(roles.all { it == "user" || it == "assistant" }) { "Invalid history role" }
+        check(_state.value is InferenceEngine.State.ModelReady) {
+            "Cannot restore conversation while model is not ready"
+        }
+        _state.value = InferenceEngine.State.ProcessingSystemPrompt
+        try {
+            val result = restoreConversationNative(systemPrompt, roles.toTypedArray(), contents.toTypedArray())
+            check(result == 0) { "History restoration error: $result" }
+            _readyForSystemPrompt = false
+            _state.value = InferenceEngine.State.ModelReady
+        } catch (e: Exception) {
+            _state.value = InferenceEngine.State.Error(e)
+            throw e
+        }
+    }
 
     /**
      * Process the plain text system prompt
