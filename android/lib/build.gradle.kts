@@ -7,7 +7,7 @@ android {
     compileSdk = 36
     ndkVersion = "29.0.13113456"
     defaultConfig {
-        minSdk = 28
+        minSdk = 30
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake {
