@@ -3,6 +3,9 @@
 #include <iomanip>
 #include <cmath>
 #include <string>
+#include <deque>
+#include <cstdint>
+#include <limits>
 #include <chrono>
 #include <stdexcept>
 #include <utility>
@@ -41,6 +44,39 @@ static llama_context                    * g_context;
 static common_batch                       g_batch;
 static common_chat_templates_ptr          g_chat_templates;
 static common_sampler                   * g_sampler;
+
+// Warm LRU cache: keep bounded KV snapshots for previously visited chats.
+// Snapshot data are private process memory, tied to the loaded GGUF and
+// conversation revision; never persisted or exposed to untrusted code.
+struct context_snapshot {
+    int64_t chat_id = 0;
+    int64_t revision = 0;
+    std::string config_key;
+    std::vector<uint8_t> kv;
+    std::vector<common_chat_msg> messages;
+    llama_pos current_pos = 0;
+    llama_pos system_pos = 0;
+};
+constexpr size_t SNAPSHOT_TOTAL_LIMIT = 160ULL * 1024ULL * 1024ULL;
+constexpr size_t SNAPSHOT_SINGLE_LIMIT = 120ULL * 1024ULL * 1024ULL;
+constexpr size_t SNAPSHOT_MAX_ITEMS = 2;
+static std::deque<context_snapshot> g_snapshots;
+static size_t g_snapshot_bytes = 0;
+
+static void snapshot_clear_all() {
+    g_snapshots.clear();
+    g_snapshot_bytes = 0;
+}
+
+static void snapshot_drop_chat(int64_t chat_id) {
+    for (auto it = g_snapshots.begin(); it != g_snapshots.end();) {
+        if (it->chat_id == chat_id) {
+            g_snapshot_bytes -= it->kv.size();
+            it = g_snapshots.erase(it);
+        } else ++it;
+    }
+}
+
 
 extern "C"
 JNIEXPORT void JNICALL
@@ -122,6 +158,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_prepare(JNIEnv * /*env*/, jobje
     auto *context = init_context(g_model);
     if (!context) { return 1; }
     g_context = context;
+    snapshot_clear_all();  // snapshots belong to one loaded model
     g_batch = common_batch(context);
     g_chat_templates = common_chat_templates_init(g_model, "");
     g_sampler = new_sampler(DEFAULT_SAMPLER_TEMP);
@@ -292,6 +329,111 @@ static void shift_context() {
     LOGi("%s: Context shifting done! Current position: %d", __func__, current_position);
 }
 
+
+
+// Create a verified, size-bounded state snapshot without replaying history.
+// Only invoked after a fully completed turn, never during sampling.
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_cacheConversationNative(
+        JNIEnv * env, jobject, jlong chat_id, jlong revision, jstring jconfig_key) {
+    if (!g_context || !g_model || !g_sampler || chat_msgs.empty() ||
+        current_position <= 0 || chat_id <= 0 || !jconfig_key) return JNI_FALSE;
+    const char * raw = env->GetStringUTFChars(jconfig_key, nullptr);
+    const std::string key(raw);
+    env->ReleaseStringUTFChars(jconfig_key, raw);
+    if (key.size() != 64) return JNI_FALSE;
+
+    try {
+        // Exact size per sequence from the pinned llama.cpp API.
+        const size_t required = llama_state_seq_get_size(g_context, 0);
+        if (required == 0 || required > SNAPSHOT_SINGLE_LIMIT) {
+            LOGi("KV snapshot skipped: size %zu exceeds budget", required);
+            snapshot_drop_chat((int64_t)chat_id);
+            return JNI_FALSE;
+        }
+        context_snapshot snap;
+        snap.chat_id = (int64_t)chat_id;
+        snap.revision = (int64_t)revision;
+        snap.config_key = key;
+        snap.messages = chat_msgs;
+        snap.current_pos = current_position;
+        snap.system_pos = system_prompt_position;
+        snap.kv.resize(required);
+        const size_t copied = llama_state_seq_get_data(
+            g_context, snap.kv.data(), snap.kv.size(), 0);
+        if (copied == 0 || copied > required) return JNI_FALSE;
+        snap.kv.resize(copied);
+        snapshot_drop_chat(snap.chat_id);
+        while (!g_snapshots.empty() &&
+                (g_snapshots.size() >= SNAPSHOT_MAX_ITEMS ||
+                 g_snapshot_bytes + snap.kv.size() > SNAPSHOT_TOTAL_LIMIT)) {
+            g_snapshot_bytes -= g_snapshots.front().kv.size();
+            g_snapshots.pop_front();
+        }
+        g_snapshot_bytes += snap.kv.size();
+        g_snapshots.push_back(std::move(snap));
+        LOGi("KV snapshot stored for chat %lld, %zu bytes, %zu retained",
+             (long long)chat_id, copied, g_snapshots.size());
+        return JNI_TRUE;
+    } catch (const std::bad_alloc &) {
+        LOGw("KV snapshot allocation failed; replay fallback retained");
+        snapshot_drop_chat((int64_t)chat_id);
+        return JNI_FALSE;
+    } catch (const std::exception &ex) {
+        LOGw("KV snapshot failed: %s", ex.what());
+        return JNI_FALSE;
+    }
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_restoreCachedConversationNative(
+        JNIEnv * env, jobject, jlong chat_id, jlong revision, jstring jconfig_key) {
+    if (!g_context || !g_model || !g_sampler || chat_id <= 0 || !jconfig_key)
+        return JNI_FALSE;
+    const char * raw = env->GetStringUTFChars(jconfig_key, nullptr);
+    const std::string key(raw);
+    env->ReleaseStringUTFChars(jconfig_key, raw);
+    if (key.size() != 64) return JNI_FALSE;
+    const auto it = std::find_if(g_snapshots.begin(), g_snapshots.end(),
+        [&](const context_snapshot & s) {
+            return s.chat_id == (int64_t)chat_id &&
+                   s.revision == (int64_t)revision &&
+                   s.config_key == key;
+        });
+    if (it == g_snapshots.end()) return JNI_FALSE;
+    try {
+        llama_memory_clear(llama_get_memory(g_context), false);
+        const size_t restored = llama_state_seq_set_data(
+            g_context, it->kv.data(), it->kv.size(), 0);
+        if (restored == 0 || restored > it->kv.size()) {
+            LOGw("KV state restore rejected; using full replay fallback");
+            snapshot_drop_chat((int64_t)chat_id);
+            reset_long_term_states();
+            reset_short_term_states();
+            return JNI_FALSE;
+        }
+        chat_msgs = it->messages;
+        current_position = it->current_pos;
+        system_prompt_position = it->system_pos;
+        reset_short_term_states();
+        common_sampler_reset(g_sampler);
+        // Promote to MRU.
+        auto current = std::move(*it);
+        g_snapshots.erase(it);
+        g_snapshots.push_back(std::move(current));
+        LOGi("KV cache hit for chat %lld, %zu bytes, %d tokens",
+             (long long)chat_id, restored, (int)current_position);
+        return JNI_TRUE;
+    } catch (const std::exception &ex) {
+        LOGw("KV restore exception: %s", ex.what());
+        snapshot_drop_chat((int64_t)chat_id);
+        reset_long_term_states();
+        reset_short_term_states();
+        return JNI_FALSE;
+    }
+}
 
 // Native schema mode uses the GGUF's LFM3 Jinja chat template. It is optional:
 // older GGUFs without the required tool support keep the previous prompt path.
@@ -826,6 +968,7 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_unload(JNIEnv * /*unused*/, jobject /*unused*/) {
     // Partial load errors may leave some native pointers null.
+    snapshot_clear_all();
     reset_long_term_states();
     reset_short_term_states();
     if (g_sampler) common_sampler_free(g_sampler);
