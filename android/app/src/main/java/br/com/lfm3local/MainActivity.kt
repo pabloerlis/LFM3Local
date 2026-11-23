@@ -2,6 +2,7 @@ package br.com.lfm3local
 
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -35,6 +36,8 @@ import com.arm.aichat.InferenceEngine
 import br.com.lfm3local.harness.HarnessTurnCoordinator
 import br.com.lfm3local.harness.Lfm3Backend
 import br.com.lfm3local.harness.harnessSystemPrompt
+import br.com.lfm3local.harness.retryOnceWhenContextFull
+import br.com.lfm3local.harness.TurnProfiler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private val searchText = mutableStateOf("")
     private val draft = mutableStateOf("")
     private val engineStatus = mutableStateOf("Iniciando mecanismo local…")
+    private val lastTurnTelemetry = mutableStateOf("")
     private val modelReady = mutableStateOf(false)
     private val modelBusy = mutableStateOf(true)
     private val contextBusy = mutableStateOf(false)
@@ -165,9 +169,18 @@ class MainActivity : ComponentActivity() {
                 ) {
                     StatusDot(modelReady.value)
                     Spacer(Modifier.width(8.dp))
-                    Text(engineStatus.value, Modifier.weight(1f),
-                        color = muted, fontSize = 12.sp,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Column(Modifier.weight(1f)) {
+                        Text(engineStatus.value, color = muted, fontSize = 12.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (lastTurnTelemetry.value.isNotBlank()) {
+                            Text(lastTurnTelemetry.value, color = muted, fontSize = 10.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (!modelReady.value && !modelBusy.value &&
+                        getPreferences(MODE_PRIVATE).getString(PREF_MODEL, null) != null) {
+                        TextButton(onClick = ::retryModel) { Text("Recarregar") }
+                    }
                     if (!modelBusy.value && !responding.value) {
                         TextButton(onClick = { pickModel.launch(arrayOf("*/*")) }) { Text("Modelo") }
                     }
@@ -319,12 +332,24 @@ class MainActivity : ComponentActivity() {
                         Text(engineStatus.value, fontSize = 12.sp, color = textDark,
                             modifier = Modifier.weight(1f), maxLines = 3)
                         if (!modelReady.value && !modelBusy.value) {
-                            TextButton(onClick = { pickModel.launch(arrayOf("*/*")) }) {
-                                Text("Importar GGUF")
+                            val previous = getPreferences(MODE_PRIVATE)
+                                .getString(PREF_MODEL, null)
+                            TextButton(onClick = {
+                                if (previous != null) retryModel()
+                                else pickModel.launch(arrayOf("*/*"))
+                            }) {
+                                Text(if (previous == null) "Importar GGUF" else "Recarregar")
                             }
                         }
                     }
                 }
+            }
+            if (lastTurnTelemetry.value.isNotBlank()) {
+                Text(lastTurnTelemetry.value,
+                    Modifier.fillMaxWidth().background(Color(0xFFE5F4EF))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    color = deepGreen, fontSize = 11.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (entries.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -563,6 +588,7 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             nativeChatId = null
+            modelReady.value = false
             Log.e(TAG, "Failed to restore conversation", e)
             engineStatus.value = "Falha ao restaurar contexto: " + (e.message ?: "desconhecida")
         } finally {
@@ -622,7 +648,9 @@ class MainActivity : ComponentActivity() {
             content.lineSequence().first().trim().take(46).ifBlank { "Nova conversa" }
         } else null
         engineStatus.value = "Preparando resposta…"
+        lastTurnTelemetry.value = ""
         generation = lifecycleScope.launch {
+            val profiler = TurnProfiler { SystemClock.elapsedRealtime() }
             var assistantId: Long? = null
             var latest = ""
             var checkpointLength = 0
@@ -639,31 +667,56 @@ class MainActivity : ComponentActivity() {
                 entries.add(LocalMessage(result.second, id, "assistant", "", "draft", System.currentTimeMillis()))
 
                 withContext(Dispatchers.Default) {
-                    HarnessTurnCoordinator(Lfm3Backend(engine)).run(
-                        user = content,
-                        onText = { visible ->
-                            if (visible != latest) {
-                                latest = visible
-                                withContext(Dispatchers.Main) {
-                                    replaceEntry(result.second, visible, "draft")
+                    retryOnceWhenContextFull(
+                        rebuild = {
+                            withContext(Dispatchers.Main) {
+                                engineStatus.value = "Contexto cheio: recuperando mensagens recentes…"
+                            }
+                            val older = withContext(Dispatchers.IO) {
+                                store.messages(id).filter { message ->
+                                    message.id != result.first && message.body.isNotBlank() &&
+                                        (message.status == "complete" ||
+                                            message.status == "interrupted") &&
+                                        message.body != "Resposta interrompida."
                                 }
-                                if (visible.length - checkpointLength >= 180) {
-                                    withContext(Dispatchers.IO) {
-                                        store.updateMessage(result.second, id, visible, "draft")
+                            }
+                            engine.restoreConversation(
+                                harnessSystemPrompt(), older.map { it.role }, older.map { it.body }
+                            )
+                        },
+                        operation = {
+                            HarnessTurnCoordinator(Lfm3Backend(engine)).run(
+                                user = content,
+                                onText = { visible ->
+                                    if (visible != latest) {
+                                        latest = visible
+                                        val stats = profiler.textVisible(visible).shortText()
+                                        withContext(Dispatchers.Main) {
+                                            replaceEntry(result.second, visible, "draft")
+                                            lastTurnTelemetry.value = stats
+                                        }
+                                        if (visible.length - checkpointLength >= 180) {
+                                            withContext(Dispatchers.IO) {
+                                                store.updateMessage(result.second, id, visible, "draft")
+                                            }
+                                            checkpointLength = visible.length
+                                        }
                                     }
-                                    checkpointLength = visible.length
+                                },
+                                onStatus = { phase ->
+                                    withContext(Dispatchers.Main) { engineStatus.value = phase }
+                                },
+                                onEvent = { event ->
+                                    withContext(Dispatchers.IO) {
+                                        store.appendToolEvent(
+                                            id, event.name, event.arguments, event.outcome, event.success
+                                        )
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        lastTurnTelemetry.value = profiler.toolAttempt().shortText()
+                                    }
                                 }
-                            }
-                        },
-                        onStatus = { phase ->
-                            withContext(Dispatchers.Main) { engineStatus.value = phase }
-                        },
-                        onEvent = { event ->
-                            withContext(Dispatchers.IO) {
-                                store.appendToolEvent(
-                                    id, event.name, event.arguments, event.outcome, event.success
-                                )
-                            }
+                            )
                         }
                     )
                 }
@@ -673,8 +726,10 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) {
                     store.updateMessage(result.second, id, latest, complete)
                 }
+                lastTurnTelemetry.value = profiler.snapshot().shortText()
                 engineStatus.value = "Modelo pronto • resposta concluída"
             } catch (cancel: CancellationException) {
+                nativeChatId = null
                 engineStatus.value = "Geração interrompida"
                 val reply = assistantId
                 if (reply != null) {
@@ -692,11 +747,19 @@ class MainActivity : ComponentActivity() {
                     withContext(Dispatchers.IO) { store.updateMessage(reply, id, body, "error") }
                     replaceEntry(reply, body, "error")
                 }
-                nativeChatId = null // Require explicit recovery rather than silently continuing broken KV.
+                nativeChatId = null
+                modelReady.value = engine.state.value is InferenceEngine.State.ModelReady
             } finally {
                 generation = null
                 responding.value = false
                 refreshConversations()
+                // A partial assistant turn may not contain its end-of-message token.
+                // Rebuild the KV cache from the journal before another user turn.
+                if (nativeChatId == null && modelReady.value &&
+                    engine.state.value is InferenceEngine.State.ModelReady &&
+                    selectedId.value == id) {
+                    restoreContext(id)
+                }
             }
         }
     }
@@ -765,6 +828,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun retryModel() {
+        if (modelBusy.value || responding.value || contextBusy.value) return
+        val model = getPreferences(MODE_PRIVATE).getString(PREF_MODEL, null)
+        if (model == null || !File(model).isFile) {
+            engineStatus.value = "Arquivo GGUF anterior não encontrado; importe o modelo."
+            return
+        }
+        lifecycleScope.launch { loadModel(File(model)) }
+    }
+
     private suspend fun loadModel(file: File) {
         modelBusy.value = true
         modelReady.value = false
@@ -772,7 +845,10 @@ class MainActivity : ComponentActivity() {
         engineStatus.value = "Carregando pesos do modelo…"
         try {
             withContext(Dispatchers.IO) {
-                if (engine.state.value is InferenceEngine.State.ModelReady) engine.cleanUp()
+                if (engine.state.value is InferenceEngine.State.ModelReady ||
+                    engine.state.value is InferenceEngine.State.Error) {
+                    engine.cleanUp()
+                }
                 engine.loadModel(file.path)
             }
             engineStatus.value = "Inicializando conversa…"
