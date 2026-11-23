@@ -117,7 +117,10 @@ class MainActivity : ComponentActivity() {
             BackHandler(enabled = chatId != null) {
                 if (responding.value) stopGeneration() else goHome()
             }
-            if (chatId == null) HomeScreen() else ConversationScreen(chatId)
+            Box(Modifier.fillMaxSize().background(Color.White)
+                .statusBarsPadding().navigationBarsPadding()) {
+                if (chatId == null) HomeScreen() else ConversationScreen(chatId)
+            }
         }
     }
 

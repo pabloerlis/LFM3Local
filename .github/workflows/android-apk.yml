@@ -8,6 +8,10 @@ on:
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -38,7 +42,14 @@ jobs:
       - name: Checkout pinned llama.cpp
         run: bash scripts/bootstrap-llama.sh
       - name: Build Debug APK
-        run: gradle -p android :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          for attempt in 1 2 3; do
+            if gradle -p android :app:assembleDebug --no-daemon --stacktrace --max-workers=2; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep $((attempt * 20))
+          done
       - name: Verify arm64 library packaged
         run: |
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libai-chat.so'
