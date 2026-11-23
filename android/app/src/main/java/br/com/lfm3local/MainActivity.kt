@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.NativeToolSchema
+import br.com.lfm3local.harness.LocalToolRegistry
 import br.com.lfm3local.harness.HarnessTurnCoordinator
 import br.com.lfm3local.harness.Lfm3Backend
 import br.com.lfm3local.harness.harnessSystemPrompt
@@ -83,6 +85,8 @@ class MainActivity : ComponentActivity() {
     private val engineStatus = mutableStateOf("Iniciando mecanismo local…")
     private val lastTurnTelemetry = mutableStateOf("")
     private val runtimeStage = mutableStateOf("Iniciando")
+    private val nativeToolMode = mutableStateOf(false)
+    private val toolTemplateStatus = mutableStateOf("Aguardando modelo")
     private val modelReady = mutableStateOf(false)
     private val modelBusy = mutableStateOf(true)
     private val contextBusy = mutableStateOf(false)
@@ -226,7 +230,15 @@ class MainActivity : ComponentActivity() {
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("Motor: " + runtimeStage.value, color = deepGreen, fontSize = 10.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        if (lastTurnTelemetry.value.isNotBlank()) {
+                        Text("Ferramentas: " + toolTemplateStatus.value, color = deepGreen,
+                            fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (modelReady.value && !responding.value && !modelBusy.value) {
+                Text("Ferramentas: " + toolTemplateStatus.value,
+                    Modifier.fillMaxWidth().background(Color(0xFFE9F5F1))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    color = deepGreen, fontSize = 11.sp)
+            }
+            if (lastTurnTelemetry.value.isNotBlank()) {
                             Text(lastTurnTelemetry.value, color = muted, fontSize = 10.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
@@ -584,6 +596,18 @@ class MainActivity : ComponentActivity() {
     private fun activeSkills(): SkillCatalog =
         if (notesEnabled.value) SkillCatalog(listOf(NotesSkill(store))) else SkillCatalog()
 
+    /** Registers the exact allowlist of local tools into the model's Jinja template. */
+    private suspend fun syncToolSchemas(): Boolean {
+        val definitions = LocalToolRegistry().definitions + activeSkills().definitions()
+        val registered = engine.configureToolSchemas(definitions.map {
+            NativeToolSchema(it.name, it.description, it.schema)
+        })
+        nativeToolMode.value = registered
+        toolTemplateStatus.value = if (registered) "Template LFM3 nativo"
+            else "Compatibilidade (prompt)"
+        return registered
+    }
+
     private fun refreshNotes() {
         lifecycleScope.launch {
             try {
@@ -600,6 +624,8 @@ class MainActivity : ComponentActivity() {
         if (responding.value || modelBusy.value || contextBusy.value) return
         getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_NOTES, checked).apply()
         notesEnabled.value = checked
+        nativeToolMode.value = false
+        toolTemplateStatus.value = "Reconfiguração pendente"
         nativeChatId = null
         notesError.value = ""
     }
@@ -682,8 +708,10 @@ class MainActivity : ComponentActivity() {
                     (it.status == "interrupted" && it.body != "Resposta interrompida.")) &&
                     it.body.isNotBlank()
             }
+            syncToolSchemas()
             engine.restoreConversation(
-                harnessSystemPrompt(activeSkills()), replay.map { it.role }, replay.map { it.body }
+                harnessSystemPrompt(activeSkills(), nativeToolMode.value),
+                replay.map { it.role }, replay.map { it.body }
             )
             if (selectedId.value == chatId) {
                 nativeChatId = chatId
@@ -796,8 +824,10 @@ class MainActivity : ComponentActivity() {
                                         message.body != "Resposta interrompida."
                                 }
                             }
+                            syncToolSchemas()
                             engine.restoreConversation(
-                                harnessSystemPrompt(activeSkills()), older.map { it.role }, older.map { it.body }
+                                harnessSystemPrompt(activeSkills(), nativeToolMode.value),
+                                older.map { it.role }, older.map { it.body }
                             )
                         },
                         operation = {
@@ -974,7 +1004,10 @@ class MainActivity : ComponentActivity() {
                 engine.loadModel(file.path)
             }
             engineStatus.value = "Inicializando conversa…"
-            withContext(Dispatchers.IO) { engine.setSystemPrompt(harnessSystemPrompt(activeSkills())) }
+            withContext(Dispatchers.IO) {
+                syncToolSchemas()
+                engine.setSystemPrompt(harnessSystemPrompt(activeSkills(), nativeToolMode.value))
+            }
             modelReady.value = true
             engineStatus.value = "Modelo pronto • offline"
             selectedId.value?.let { restoreContext(it) }
