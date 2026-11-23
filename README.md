@@ -1,6 +1,21 @@
-# LFM3Local — Android Harness MVP 0.5.0
+# LFM3Local — Android Harness MVP 0.6.0
 
 Aplicativo **offline** dedicado ao **Liquid AI LFM3-1.7B-Q4_K_M.gguf**, com chat estilo mensageiro, histórico local e **harness inicial de ferramentas** via `llama.cpp`.
+
+## Harness v0.6.0 — JSON Schemas nativos do LFM3
+
+**Alteração testável:** o harness registra as ferramentas `calculator`, `get_current_datetime` e, quando habilitada, `search_local_notes`, diretamente no **chat template Jinja do GGUF**. É o mecanismo previsto pela Liquid AI para apresentar os JSON Schemas ao modelo, em vez de duplicá-los no prompt de sistema.
+
+- A aplicação verifica se o GGUF suporta o template LFM3 com `<tools>`, `<additional_tools>` e `<tool_response>`, e se ele renderiza todos os nomes de ferramentas.
+- Se compatível, mostra **Ferramentas: Template LFM3 nativo** e usa o Jinja no sistema, nas mensagens e nas respostas de ferramentas.
+- Se incompatível, mostra **Ferramentas: Compatibilidade (prompt)** e conserva o mecanismo anterior sem falhar no carregamento.
+- As duas opções preservam a mesma lista de permissões/skills, registro de atividades e limite de duas ferramentas por turno.
+- Quando a skill Notas locais está desativada, seu schema **não é incluído** no template e a execução continua negada.
+- Testes unitários reforçados para evitar duplicar schemas no prompt e garantir que a skill só apareça quando habilitada.
+
+**Teste prático v0.6.0:** confira em Conversas o indicador **Ferramentas: ...**. Peça `Use calculator para calcular (17*3)+2` e, com Notas locais ligada, consulte uma nota criada por você. Em ambos, verifique a atividade do harness e a resposta final. Desative a skill, retorne à conversa e confirme que o acesso não é concedido.
+
+**Limitação:** compilação e testes JVM não provam a compatibilidade do seu GGUF específico; é necessário confirmar o status no aplicativo. O modo nativo usa um formato incremental da conversa; a ferramenta será enviada pelo papel `tool`, e a captura/representação de chamadas ainda é validada pelo parser do Android.
 
 ## Harness v0.5.0 — primeira skill independente com dados locais
 
@@ -60,7 +75,7 @@ experimentais do Preview. Não substitui uma assinatura de release segura e perm
 ## Instalar o APK
 
 - Android **11 ou mais recente** (API 30+), processador ARM64.
-- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/runs/45209048089). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.5.0-preview-APK** e extraia `app-debug.apk`.
+- [Build do harness 0.3.0 no GitHub Actions](https://github.com/pabloerlis/LFM3Local/actions/workflows/android-apk.yml). Abra a execução aprovada mais recente, baixe o ZIP **LFM3Local-Harness-v0.6.0-preview-APK** e extraia `app-debug.apk`.
 - O modelo é **baixado separadamente**: [LFM3-1.7B-GGUF — Q4_K_M](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/tree/main) (~1,05 GB). Não está dentro do APK.
 - Ao instalar pela primeira vez, pressione **Modelo** e importe o GGUF. O app faz uma cópia para seu armazenamento privado e tenta carregá-lo automaticamente na próxima abertura.
 
