@@ -23,9 +23,19 @@ data class LocalMessage(
     val timestamp: Long
 )
 
+data class LocalToolEvent(
+    val id: Long,
+    val chatId: Long,
+    val tool: String,
+    val parameters: String,
+    val outcome: String,
+    val success: Boolean,
+    val timestamp: Long
+)
+
 /** All calls must be dispatched off the Android UI thread. */
 class ChatStore(context: Context) : SQLiteOpenHelper(
-    context.applicationContext, "lfm3local_history.db", null, 1
+    context.applicationContext, "lfm3local_history.db", null, 2
 ) {
     override fun onConfigure(db: SQLiteDatabase) {
         db.setForeignKeyConstraintsEnabled(true)
@@ -53,10 +63,28 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
         """.trimIndent())
         db.execSQL("CREATE INDEX messages_by_chat ON messages(chat_id, id)")
         db.execSQL("CREATE INDEX conversations_recent ON conversations(updated_ms DESC)")
+        createToolEventsTable(db)
+    }
+
+    private fun createToolEventsTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE tool_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                tool TEXT NOT NULL,
+                parameters TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                timestamp_ms INTEGER NOT NULL
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX tool_events_by_chat ON tool_events(chat_id, id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        throw IllegalStateException("Unimplemented database migration $oldVersion -> $newVersion")
+        if (oldVersion < 2 && newVersion >= 2) {
+            createToolEventsTable(db)
+        }
     }
 
     /** A process may die during token streaming; mark such turns as interrupted. */
@@ -137,6 +165,37 @@ class ChatStore(context: Context) : SQLiteOpenHelper(
             put("status", status)
         }, "id=? AND chat_id=?", arrayOf(messageId.toString(), chatId.toString()))
         touch(db, chatId, body, System.currentTimeMillis())
+    }
+
+    /** Audit log of actual tool executions or permission denials. */
+    fun appendToolEvent(chatId: Long, tool: String, parameters: String,
+                        outcome: String, success: Boolean) {
+        writableDatabase.insertOrThrow("tool_events", null, ContentValues().apply {
+            put("chat_id", chatId)
+            put("tool", tool.take(64))
+            put("parameters", parameters.take(300))
+            put("outcome", outcome.take(500))
+            put("success", if (success) 1 else 0)
+            put("timestamp_ms", System.currentTimeMillis())
+        })
+    }
+
+    fun toolEvents(chatId: Long): List<LocalToolEvent> {
+        val result = mutableListOf<LocalToolEvent>()
+        readableDatabase.query(
+            "tool_events",
+            arrayOf("id", "chat_id", "tool", "parameters", "outcome", "success", "timestamp_ms"),
+            "chat_id=?", arrayOf(chatId.toString()), null, null, "id DESC", "50"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result.add(LocalToolEvent(
+                    cursor.getLong(0), cursor.getLong(1), cursor.getString(2),
+                    cursor.getString(3), cursor.getString(4),
+                    cursor.getInt(5) == 1, cursor.getLong(6)
+                ))
+            }
+        }
+        return result
     }
 
     fun rename(chatId: Long, title: String) {
