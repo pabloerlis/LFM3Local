@@ -185,18 +185,24 @@ object ArithmeticEvaluator {
     }
 }
 
-class ToolTurnPolicy(private val tools: LocalToolRegistry, private val maxCalls: Int = 2) {
+class ToolTurnPolicy(
+    private val tools: LocalToolRegistry,
+    private val maxCalls: Int = 2,
+    private val skills: SkillCatalog = SkillCatalog()
+) {
     private var attempts = 0
     private val seen = mutableSetOf<String>()
     fun checkAndRun(call: ToolInvocation): ToolOutcome {
         if (attempts >= maxCalls) return ToolOutcome(false, "Limite de ferramentas por turno")
         attempts++
-        if (tools.definitions.none { it.name == call.name }) {
+        val isCore = tools.definitions.any { it.name == call.name }
+        val isSkill = skills.definitions().any { it.name == call.name }
+        if (!isCore && !isSkill) {
             return ToolOutcome(false, "Ferramenta não autorizada: " + call.name)
         }
         val signature = call.name + ":" + call.arguments.entries.sortedBy { it.key }.toString()
         if (!seen.add(signature)) return ToolOutcome(false, "Chamada repetida detectada")
-        return tools.execute(call)
+        return if (isCore) tools.execute(call) else skills.run(call)
     }
     fun attempts() = attempts
 }
